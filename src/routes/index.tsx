@@ -5,7 +5,7 @@ import Papa from "papaparse";
 import { toast } from "sonner";
 import {
   Upload, Sun, Moon, Trash2, Send, Mail, Code2, Copy,
-  Zap, FileText, Eye, SkipForward,
+  Zap, FileText, Eye, SkipForward, Save, AlertTriangle,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -45,6 +45,7 @@ interface PersistedState {
   sampleIdB: number;
   subjectB: string;
   htmlB: string;
+  templateSlotsA: { name: string; subject: string; body: string }[];
 }
 
 const STORAGE_KEY = "midey.outreach.v1";
@@ -61,6 +62,7 @@ const DEFAULT_STATE: PersistedState = {
   sampleIdB: 0,
   subjectB: "A note for {first_name}",
   htmlB: "<div style=\"font-family:system-ui;line-height:1.55\">\n  <h2 style=\"color:#0ea5e9\">Hi {first_name} 👋</h2>\n  <p>Loved what you're doing at <b>{company}</b>.</p>\n  <p>— Midey Enterprises</p>\n</div>",
+  templateSlotsA: [],
 };
 
 /* --------------------------- Utilities --------------------------- */
