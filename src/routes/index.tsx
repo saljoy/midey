@@ -5,7 +5,7 @@ import Papa from "papaparse";
 import { toast } from "sonner";
 import {
   Upload, Sun, Moon, Trash2, Send, Mail, Code2, Copy, Check,
-  Zap, FileText, Hash, Eye, SkipForward,
+  Zap, FileText, Eye, SkipForward,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -473,30 +473,6 @@ function IngestPanel({
             </select>
           </div>
 
-          <div className="mt-4">
-            <Label className="text-xs uppercase tracking-wider text-muted-foreground">
-              Tokens · tap to copy
-            </Label>
-            <div className="mt-2 flex flex-wrap gap-1.5">
-              {headers.map((h) => {
-                const active = copiedToken === h;
-                return (
-                  <button
-                    key={h}
-                    onClick={() => copyToken(h)}
-                    className={cn(
-                      "inline-flex items-center gap-1 rounded-md border border-border-strong/70 bg-surface-2 px-2 py-1 font-mono-data text-xs transition",
-                      "hover:border-[var(--sky)]/60 hover:text-sky-glow active:scale-[0.97]",
-                      active && "border-[var(--sky)]/80 text-sky-glow glow-sky",
-                    )}
-                  >
-                    {active ? <Check className="size-3" /> : <Hash className="size-3 opacity-60" />}
-                    {`{${h}}`}
-                  </button>
-                );
-              })}
-            </div>
-          </div>
         </>
       )}
     </section>
