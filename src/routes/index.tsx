@@ -137,8 +137,11 @@ function Index() {
     Papa.parse<Row>(file, {
       header: true,
       skipEmptyLines: true,
-      worker: true,
-      chunkSize: 1024 * 512, // 512KB chunks
+      // NOTE: worker:true + chunk callback is unreliable in some browsers
+      // (cursor never updates → progress stuck at 0%, complete never fires).
+      // Stream on the main thread in 1MB chunks; React state updates
+      // between chunks keep the UI responsive even for 50MB+ files.
+      chunkSize: 1024 * 1024,
       chunk: (results, parser) => {
         if (!headers.length && results.meta.fields) {
           // Sanitize: only accept clean column-name tokens from row 1.
@@ -159,7 +162,10 @@ function Index() {
         }
         for (const r of results.data) collected.push(r);
         const cursor = (results.meta as { cursor?: number }).cursor ?? 0;
-        setParseProgress(Math.min(100, Math.round((cursor / total) * 100)));
+        const pct = cursor > 0
+          ? Math.min(99, Math.round((cursor / total) * 100))
+          : Math.min(99, Math.round((collected.length / Math.max(1000, collected.length + 1000)) * 100));
+        setParseProgress(pct);
         if (collected.length > 500_000) {
           parser.abort();
           toast.error("Row cap (500k) reached — truncated.");
