@@ -5,7 +5,7 @@ import Papa from "papaparse";
 import { toast } from "sonner";
 import {
   Upload, Sun, Moon, Trash2, Send, Mail, Code2, Copy,
-  Zap, FileText, Eye, SkipForward,
+  Zap, FileText, Eye, SkipForward, Save, AlertTriangle,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -45,6 +45,7 @@ interface PersistedState {
   sampleIdB: number;
   subjectB: string;
   htmlB: string;
+  templateSlotsA: { name: string; subject: string; body: string }[];
 }
 
 const STORAGE_KEY = "midey.outreach.v1";
@@ -61,6 +62,7 @@ const DEFAULT_STATE: PersistedState = {
   sampleIdB: 0,
   subjectB: "A note for {first_name}",
   htmlB: "<div style=\"font-family:system-ui;line-height:1.55\">\n  <h2 style=\"color:#0ea5e9\">Hi {first_name} 👋</h2>\n  <p>Loved what you're doing at <b>{company}</b>.</p>\n  <p>— Midey Enterprises</p>\n</div>",
+  templateSlotsA: [],
 };
 
 /* --------------------------- Utilities --------------------------- */
@@ -522,9 +524,101 @@ function SectionACard({
     (i) => (state.rowStates[i] ?? "pending") === "pending",
   );
   const pendingCount = state.rows.length - processedCount;
+  const [filter, setFilter] = useState<"all" | "active" | "processed">("all");
+  const processedIndices = useMemo(
+    () => Object.entries(state.rowStates)
+      .filter(([, v]) => v === "processed")
+      .map(([k]) => Number(k))
+      .sort((a, b) => a - b),
+    [state.rowStates],
+  );
+
+  // Char counter for active row's mailto string
+  const previewRow = state.rows[nextPendingIndex ?? -1];
+  const previewTo = (previewRow?.[state.targetEmailHeader] ?? "").trim();
+  const previewSubject = renderTemplate(state.subjectA, previewRow);
+  const previewBody = renderTemplate(state.bodyA, previewRow);
+  const mailtoLen = previewRow
+    ? `mailto:${previewTo}?subject=${encodeURIComponent(previewSubject)}&body=${encodeURIComponent(previewBody)}`.length
+    : 0;
+  const overLimit = mailtoLen > 2000;
+
+  // Template slot manager
+  const [slotName, setSlotName] = useState("");
+  const [slotPickerOpen, setSlotPickerOpen] = useState(false);
+  const saveSlot = () => {
+    const name = slotName.trim();
+    if (!name) { toast.error("Slot name required"); return; }
+    const next = state.templateSlotsA.filter((s) => s.name !== name);
+    next.push({ name, subject: state.subjectA, body: state.bodyA });
+    patch({ templateSlotsA: next });
+    setSlotName("");
+    toast.success(`Saved slot "${name}"`);
+  };
+  const loadSlot = (name: string) => {
+    const slot = state.templateSlotsA.find((s) => s.name === name);
+    if (!slot) return;
+    patch({ subjectA: slot.subject, bodyA: slot.body });
+    setSlotPickerOpen(false);
+    toast.success(`Loaded "${name}"`);
+  };
+  const deleteSlot = (name: string) => {
+    patch({ templateSlotsA: state.templateSlotsA.filter((s) => s.name !== name) });
+    toast.success(`Deleted "${name}"`);
+  };
 
   return (
     <div className="space-y-4 rounded-xl border border-border-strong/70 bg-surface-1 p-4">
+      {/* Template slot manager */}
+      <div className="flex flex-wrap items-center gap-2 rounded-lg border border-border-strong/60 bg-surface-2 p-2">
+        <span className="font-mono-data text-[10px] uppercase tracking-wider text-muted-foreground">
+          Template slots
+        </span>
+        <Input
+          value={slotName}
+          onChange={(e) => setSlotName(e.target.value)}
+          placeholder="Name (e.g. Klaviyo Hook)"
+          className="h-8 max-w-[180px] font-mono-data text-xs"
+        />
+        <Button size="sm" variant="ghost" onClick={saveSlot} className="h-8">
+          <Save className="size-3.5" /> Save
+        </Button>
+        <div className="relative">
+          <Button
+            size="sm"
+            variant="ghost"
+            className="h-8"
+            onClick={() => setSlotPickerOpen((v) => !v)}
+            disabled={state.templateSlotsA.length === 0}
+          >
+            Load ({state.templateSlotsA.length}) ▾
+          </Button>
+          {slotPickerOpen && state.templateSlotsA.length > 0 && (
+            <div className="absolute right-0 z-20 mt-1 w-56 rounded-md border border-border-strong/70 bg-surface-1 p-1 shadow-lg">
+              {state.templateSlotsA.map((s) => (
+                <div key={s.name} className="flex items-center gap-1">
+                  <button
+                    type="button"
+                    onClick={() => loadSlot(s.name)}
+                    className="flex-1 truncate rounded px-2 py-1.5 text-left font-mono-data text-xs hover:bg-surface-2"
+                  >
+                    {s.name}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => deleteSlot(s.name)}
+                    aria-label={`Delete ${s.name}`}
+                    className="rounded px-1.5 py-1 text-muted-foreground hover:text-destructive"
+                  >
+                    <Trash2 className="size-3" />
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+
       <div className="grid gap-3 sm:grid-cols-2">
         <Field label="Subject template">
           <Input
@@ -552,6 +646,16 @@ function SectionACard({
           placeholder="Hi {first_name}, …"
         />
       </Field>
+      <div className="flex flex-wrap items-center justify-between gap-2 -mt-2">
+        <span className="font-mono-data text-[11px] text-muted-foreground">
+          mailto length: <span className={overLimit ? "text-amber-glow" : "text-foreground"}>{mailtoLen.toLocaleString()}</span> chars
+        </span>
+        {overLimit && (
+          <span className="inline-flex items-center gap-1 rounded-md border border-amber-glow/40 bg-amber-glow/10 px-2 py-0.5 font-mono-data text-[10px] text-amber-glow">
+            <AlertTriangle className="size-3" /> Approaching mobile link limit
+          </span>
+        )}
+      </div>
 
       <div className="flex items-center justify-between">
         <div className="font-mono-data text-xs text-muted-foreground">
@@ -561,6 +665,24 @@ function SectionACard({
         <div className="font-mono-data text-[10px] uppercase tracking-wider text-muted-foreground">
           headless
         </div>
+      </div>
+
+      {/* Quick queue filters */}
+      <div className="flex gap-1.5">
+        {(["all", "active", "processed"] as const).map((k) => (
+          <button
+            key={k}
+            type="button"
+            onClick={() => setFilter(k)}
+            className={`rounded-md border px-2.5 py-1 font-mono-data text-[11px] capitalize transition ${
+              filter === k
+                ? "border-sky-glow/60 bg-sky-glow/10 text-sky-glow glow-sky"
+                : "border-border-strong/60 bg-surface-2 text-muted-foreground hover:text-foreground"
+            }`}
+          >
+            {k === "active" ? "Active only" : k}
+          </button>
+        ))}
       </div>
 
       <div className="overflow-hidden rounded-lg border border-border-strong/60 bg-bg-app p-4">
@@ -573,6 +695,20 @@ function SectionACard({
               </p>
             </div>
           </div>
+        ) : filter === "processed" ? (
+          processedIndices.length === 0 ? (
+            <p className="py-6 text-center font-mono-data text-xs text-muted-foreground">
+              No rows processed yet.
+            </p>
+          ) : (
+            <ul className="max-h-72 space-y-1 overflow-auto">
+              {processedIndices.map((i) => (
+                <li key={i} className="flex items-center justify-between rounded border border-border-strong/40 bg-surface-2 px-2 py-1 font-mono-data text-[11px]">
+                  <span><span className="text-muted-foreground">#{i}</span> · <span className="text-foreground">{state.rows[i]?.[state.targetEmailHeader] ?? "—"}</span></span>
+                </li>
+              ))}
+            </ul>
+          )
         ) : nextPendingIndex === undefined ? (
           <p className="py-6 text-center font-mono-data text-xs text-muted-foreground">
             All rows processed.
