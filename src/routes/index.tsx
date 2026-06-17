@@ -4,7 +4,7 @@ import Papa from "papaparse";
 // react-window removed — queue is no longer displayed as a scrolling list.
 import { toast } from "sonner";
 import {
-  Upload, Sun, Moon, Trash2, Send, Mail, Code2, Copy, Check,
+  Upload, Sun, Moon, Trash2, Send, Mail, Code2, Copy,
   Zap, FileText, Eye, SkipForward,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -16,7 +16,6 @@ import {
   Dialog, DialogContent, DialogDescription, DialogFooter,
   DialogHeader, DialogTitle, DialogTrigger,
 } from "@/components/ui/dialog";
-import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/")({
   head: () => ({
@@ -95,9 +94,6 @@ function Index() {
   const [theme, setTheme] = useState<"dark" | "light">("dark");
   const [parsing, setParsing] = useState(false);
   const [parseProgress, setParseProgress] = useState(0);
-  const [copiedToken, setCopiedToken] = useState<string | null>(null);
-
-  // Hydrate from localStorage
   useEffect(() => {
     setState(loadState());
     const t = (localStorage.getItem(THEME_KEY) as "dark" | "light" | null) ?? "dark";
@@ -224,18 +220,6 @@ function Index() {
   }, []);
 
   /* ---------- Token copy ---------- */
-
-  const copyToken = useCallback((tok: string) => {
-    const text = `{${tok}}`;
-    navigator.clipboard?.writeText(text).then(
-      () => {
-        setCopiedToken(tok);
-        toast.success(`Copied ${text}`);
-        setTimeout(() => setCopiedToken((c) => (c === tok ? null : c)), 1200);
-      },
-      () => toast.error("Clipboard blocked"),
-    );
-  }, []);
 
   /* ---------- Clear all ---------- */
 
