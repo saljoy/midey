@@ -5,7 +5,7 @@ import Papa from "papaparse";
 import { toast } from "sonner";
 import {
   Upload, Sun, Moon, Trash2, Send, Mail, Code2, Copy, Check,
-  RefreshCcw, Zap, FileText, Hash, Eye,
+  Zap, FileText, Hash, Eye, SkipForward,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -505,83 +505,22 @@ function IngestPanel({
 
 /* --------------------------- Section A --------------------------- */
 
-interface RowItemProps {
-  rows: Row[];
-  queue: number[];
-  rowStates: Record<number, RowState>;
-  targetEmailHeader: string;
-  subjectTpl: string;
-  fireRow: (i: number) => void;
-  skipRow: (i: number) => void;
-  resetRow: (i: number) => void;
-}
-
-function QueueRow({
-  index, style, rows, queue, rowStates, targetEmailHeader, subjectTpl,
-  fireRow, skipRow, resetRow,
-}: RowComponentProps<RowItemProps>) {
-  const rowIndex = queue[index];
-  const row = rows[rowIndex];
-  if (!row) return <div style={style} />;
-  const status = rowStates[rowIndex] ?? "pending";
-  const email = row[targetEmailHeader] ?? "";
-  const subjectPreview = renderTemplate(subjectTpl, row);
-
-  return (
-    <div style={style} className="px-1">
-      <div
-        className={cn(
-          "mx-auto flex h-[88px] items-center gap-2 rounded-lg border border-border-strong/60 bg-surface-1 px-3 transition",
-          status !== "pending" && "opacity-45 grayscale",
-        )}
-      >
-        <div className="grid size-8 shrink-0 place-items-center rounded-md bg-surface-2 font-mono-data text-[10px] text-muted-foreground">
-          #{rowIndex}
-        </div>
-        <div className="min-w-0 flex-1">
-          <div className="truncate font-mono-data text-[13px] font-medium">
-            {email || <span className="text-destructive">(missing email)</span>}
-          </div>
-          <div className="truncate text-xs text-muted-foreground">{subjectPreview || "—"}</div>
-        </div>
-        {status === "pending" ? (
-          <>
-            <Button
-              size="sm"
-              variant="ghost"
-              onClick={() => skipRow(rowIndex)}
-              aria-label="Skip row"
-            >
-              Skip
-            </Button>
-            <Button
-              size="sm"
-              className="glow-amber bg-[var(--amber)] text-black hover:bg-[var(--amber)]/90"
-              onClick={() => fireRow(rowIndex)}
-            >
-              <Send className="size-3.5" /> Send
-            </Button>
-          </>
-        ) : (
-          <Button size="sm" variant="ghost" onClick={() => resetRow(rowIndex)}>
-            <RefreshCcw className="size-3.5" />
-          </Button>
-        )}
-      </div>
-    </div>
-  );
-}
-
 function SectionACard({
-  state, patch, queue, fireRow, skipRow, resetRow,
+  state, patch, queue, processedCount, fireRow, skipRow,
 }: {
   state: PersistedState;
   patch: (p: Partial<PersistedState>) => void;
   queue: number[];
+  processedCount: number;
   fireRow: (i: number) => void;
   skipRow: (i: number) => void;
   resetRow: (i: number) => void;
 }) {
+  const nextPendingIndex = queue.find(
+    (i) => (state.rowStates[i] ?? "pending") === "pending",
+  );
+  const pendingCount = state.rows.length - processedCount;
+
   return (
     <div className="space-y-4 rounded-xl border border-border-strong/70 bg-surface-1 p-4">
       <div className="grid gap-3 sm:grid-cols-2">
@@ -614,16 +553,17 @@ function SectionACard({
 
       <div className="flex items-center justify-between">
         <div className="font-mono-data text-xs text-muted-foreground">
-          Queue · <span className="text-foreground">{queue.length}</span> total
+          Queue · <span className="text-foreground">{pendingCount.toLocaleString()}</span> pending ·{" "}
+          <span className="text-sky-glow">{processedCount.toLocaleString()}</span> done
         </div>
         <div className="font-mono-data text-[10px] uppercase tracking-wider text-muted-foreground">
-          virtualized
+          headless
         </div>
       </div>
 
-      <div className="overflow-hidden rounded-lg border border-border-strong/60 bg-bg-app">
+      <div className="overflow-hidden rounded-lg border border-border-strong/60 bg-bg-app p-4">
         {state.rows.length === 0 ? (
-          <div className="grid h-[560px] place-items-center px-6 text-center">
+          <div className="grid place-items-center px-6 py-10 text-center">
             <div>
               <Upload className="mx-auto size-6 text-muted-foreground" />
               <p className="mt-2 text-sm text-muted-foreground">
@@ -631,25 +571,28 @@ function SectionACard({
               </p>
             </div>
           </div>
+        ) : nextPendingIndex === undefined ? (
+          <p className="py-6 text-center font-mono-data text-xs text-muted-foreground">
+            All rows processed.
+          </p>
         ) : (
-          <List
-            rowCount={queue.length}
-            rowHeight={96}
-            defaultHeight={560}
-            overscanCount={6}
-            rowComponent={QueueRow}
-            rowProps={{
-              rows: state.rows,
-              queue,
-              rowStates: state.rowStates,
-              targetEmailHeader: state.targetEmailHeader,
-              subjectTpl: state.subjectA,
-              fireRow,
-              skipRow,
-              resetRow,
-            }}
-            style={{ height: 560 }}
-          />
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="font-mono-data text-xs text-muted-foreground">
+              Next up · row <span className="text-foreground">#{nextPendingIndex}</span>
+            </div>
+            <div className="flex gap-2">
+              <Button size="sm" variant="ghost" onClick={() => skipRow(nextPendingIndex)}>
+                <SkipForward className="size-3.5" /> Skip
+              </Button>
+              <Button
+                size="sm"
+                className="glow-amber bg-[var(--amber)] text-black hover:bg-[var(--amber)]/90"
+                onClick={() => fireRow(nextPendingIndex)}
+              >
+                <Send className="size-3.5" /> Send next
+              </Button>
+            </div>
+          </div>
         )}
       </div>
     </div>
