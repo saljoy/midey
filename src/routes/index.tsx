@@ -140,7 +140,23 @@ function Index() {
       worker: true,
       chunkSize: 1024 * 512, // 512KB chunks
       chunk: (results, parser) => {
-        if (!headers.length && results.meta.fields) headers = results.meta.fields;
+        if (!headers.length && results.meta.fields) {
+          // Sanitize: only accept clean column-name tokens from row 1.
+          // Reject anything that looks like a data row (commas, newlines,
+          // very long strings, or duplicates) so row data can never
+          // leak into the token blueprint UI.
+          const seen = new Set<string>();
+          headers = results.meta.fields
+            .map((h) => (h ?? "").trim())
+            .filter((h) => {
+              if (!h) return false;
+              if (h.length > 64) return false;
+              if (/[,\n\r"]/.test(h)) return false;
+              if (seen.has(h)) return false;
+              seen.add(h);
+              return true;
+            });
+        }
         for (const r of results.data) collected.push(r);
         const cursor = (results.meta as { cursor?: number }).cursor ?? 0;
         setParseProgress(Math.min(100, Math.round((cursor / total) * 100)));
