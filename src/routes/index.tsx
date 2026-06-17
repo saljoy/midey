@@ -449,6 +449,34 @@ function IngestPanel({
             </select>
           </div>
 
+          <div className="mt-4">
+            <Label className="mb-2 block text-[10px] uppercase tracking-wider text-muted-foreground">
+              Tokens · tap to copy
+            </Label>
+            <div className="flex flex-wrap gap-1.5">
+              {headers.map((h) => {
+                const tok = `{${h}}`;
+                return (
+                  <button
+                    key={h}
+                    type="button"
+                    onClick={async () => {
+                      try {
+                        await navigator.clipboard.writeText(tok);
+                        toast.success(`Copied ${tok}`);
+                      } catch {
+                        toast.error("Copy failed");
+                      }
+                    }}
+                    className="rounded-md border border-border-strong/70 bg-surface-2 px-2 py-1 font-mono-data text-[11px] text-foreground hover:glow-sky"
+                  >
+                    {tok}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
         </>
       )}
     </section>
