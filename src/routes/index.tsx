@@ -200,10 +200,6 @@ function Index() {
       toast.error(`Row ${rowIndex} missing "${state.targetEmailHeader}"`);
       return;
     }
-    const subject = renderTemplate(state.subjectA, row);
-    const body = renderTemplate(state.bodyA, row);
-    const href = `mailto:${encodeURIComponent(toAddr)}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
-    window.location.href = href;
     setState((s) => ({ ...s, rowStates: { ...s.rowStates, [rowIndex]: "processed" } }));
   }, [state.rows, state.targetEmailHeader, state.subjectA, state.bodyA]);
 
