@@ -12,6 +12,68 @@ import { useEffect, type ReactNode } from "react";
 import appCss from "../styles.css?url";
 import { reportLovableError } from "../lib/lovable-error-reporting";
 import { Toaster } from "@/components/ui/sonner";
+import { useState } from "react";
+
+const ACCESS_PIN = "25250";
+const PIN_STORAGE_KEY = "midey.pin.ok";
+
+function PinGate({ children }: { children: ReactNode }) {
+  const [unlocked, setUnlocked] = useState(false);
+  const [checked, setChecked] = useState(false);
+  const [pin, setPin] = useState("");
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    try {
+      if (typeof window !== "undefined" && localStorage.getItem(PIN_STORAGE_KEY) === "1") {
+        setUnlocked(true);
+      }
+    } catch {}
+    setChecked(true);
+  }, []);
+
+  if (!checked) return null;
+  if (unlocked) return <>{children}</>;
+
+  const submit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (pin === ACCESS_PIN) {
+      try { localStorage.setItem(PIN_STORAGE_KEY, "1"); } catch {}
+      setUnlocked(true);
+    } else {
+      setError("Incorrect PIN");
+      setPin("");
+    }
+  };
+
+  return (
+    <div className="flex min-h-screen items-center justify-center bg-background px-4">
+      <form onSubmit={submit} className="w-full max-w-xs space-y-4 text-center">
+        <div>
+          <h1 className="text-xl font-semibold text-foreground">Midey</h1>
+          <p className="mt-1 text-sm text-muted-foreground">Enter access PIN to continue</p>
+        </div>
+        <input
+          type="password"
+          inputMode="numeric"
+          autoFocus
+          value={pin}
+          onChange={(e) => { setPin(e.target.value); setError(""); }}
+          className="w-full rounded-md border border-input bg-background px-3 py-2 text-center text-lg tracking-[0.5em] font-mono text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+          placeholder="•••••"
+          maxLength={16}
+        />
+        {error && <p className="text-sm text-destructive">{error}</p>}
+        <button
+          type="submit"
+          className="w-full rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90"
+        >
+          Unlock
+        </button>
+      </form>
+    </div>
+  );
+}
 
 function NotFoundComponent() {
   return (
@@ -123,9 +185,11 @@ function RootComponent() {
 
   return (
     <QueryClientProvider client={queryClient}>
-      {/* Required: nested routes render here. Removing <Outlet /> breaks all child routes. */}
-      <Outlet />
-      <Toaster richColors closeButton position="top-center" />
+      <PinGate>
+        {/* Required: nested routes render here. Removing <Outlet /> breaks all child routes. */}
+        <Outlet />
+        <Toaster richColors closeButton position="top-center" />
+      </PinGate>
     </QueryClientProvider>
   );
 }
