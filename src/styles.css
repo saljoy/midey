@@ -142,7 +142,7 @@
   --amber: oklch(0.78 0.16 75);
   --glow-sky: 0 0 0 1px color-mix(in oklab, var(--sky) 55%, transparent), 0 0 18px -2px color-mix(in oklab, var(--sky) 60%, transparent);
   --glow-amber: 0 0 0 1px color-mix(in oklab, var(--amber) 60%, transparent), 0 0 22px -2px color-mix(in oklab, var(--amber) 65%, transparent);
-  --mono: ui-monospace, "JetBrains Mono", "SF Mono", Menlo, Consolas, monospace;
+  --mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
   --font-system: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans", system-ui, sans-serif, "Apple Color Emoji", "Segoe UI Emoji";
 }
 .dark {
