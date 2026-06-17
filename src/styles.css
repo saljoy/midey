@@ -143,6 +143,7 @@
   --glow-sky: 0 0 0 1px color-mix(in oklab, var(--sky) 55%, transparent), 0 0 18px -2px color-mix(in oklab, var(--sky) 60%, transparent);
   --glow-amber: 0 0 0 1px color-mix(in oklab, var(--amber) 60%, transparent), 0 0 22px -2px color-mix(in oklab, var(--amber) 65%, transparent);
   --mono: ui-monospace, "JetBrains Mono", "SF Mono", Menlo, Consolas, monospace;
+  --font-system: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans", system-ui, sans-serif, "Apple Color Emoji", "Segoe UI Emoji";
 }
 .dark {
   --bg-app: oklch(0.16 0.012 260);
@@ -163,6 +164,7 @@
   --color-sky-glow: var(--sky);
   --color-amber-glow: var(--amber);
   --font-mono: var(--mono);
+  --font-sans: var(--font-system);
 }
 
 @utility glow-sky {
@@ -193,5 +195,6 @@ html, body { background: var(--bg-app); }
   body {
     background-color: var(--color-background);
     color: var(--color-foreground);
+    font-family: var(--font-system);
   }
 }
