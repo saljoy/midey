@@ -280,8 +280,6 @@ function Index() {
           processedRows={processedCount}
           targetEmailHeader={state.targetEmailHeader}
           onTargetEmailHeader={(v) => patch({ targetEmailHeader: v })}
-          copyToken={copyToken}
-          copiedToken={copiedToken}
         />
 
         <Tabs defaultValue="a" className="mt-6">
@@ -381,7 +379,7 @@ function Header({
 
 function IngestPanel({
   parsing, progress, onFile, headers, totalRows, processedRows,
-  targetEmailHeader, onTargetEmailHeader, copyToken, copiedToken,
+  targetEmailHeader, onTargetEmailHeader,
 }: {
   parsing: boolean;
   progress: number;
@@ -391,8 +389,6 @@ function IngestPanel({
   processedRows: number;
   targetEmailHeader: string;
   onTargetEmailHeader: (v: string) => void;
-  copyToken: (t: string) => void;
-  copiedToken: string | null;
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
   return (
