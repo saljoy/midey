@@ -1,7 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Papa from "papaparse";
-import { List, type RowComponentProps } from "react-window";
+// react-window removed — queue is no longer displayed as a scrolling list.
 import { toast } from "sonner";
 import {
   Upload, Sun, Moon, Trash2, Send, Mail, Code2, Copy, Check,
@@ -311,6 +311,7 @@ function Index() {
               state={state}
               patch={patch}
               queue={queue}
+              processedCount={processedCount}
               fireRow={fireRow}
               skipRow={skipRow}
               resetRow={resetRow}
