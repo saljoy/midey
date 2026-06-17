@@ -556,23 +556,76 @@ function SectionACard({
             All rows processed.
           </p>
         ) : (
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div className="font-mono-data text-xs text-muted-foreground">
-              Next up · row <span className="text-foreground">#{nextPendingIndex}</span>
-            </div>
-            <div className="flex gap-2">
-              <Button size="sm" variant="ghost" onClick={() => skipRow(nextPendingIndex)}>
-                <SkipForward className="size-3.5" /> Skip
-              </Button>
-              <Button
-                size="sm"
-                className="glow-amber bg-[var(--amber)] text-black hover:bg-[var(--amber)]/90"
-                onClick={() => fireRow(nextPendingIndex)}
-              >
-                <Send className="size-3.5" /> Send next
-              </Button>
-            </div>
-          </div>
+          <NextRowPreview
+            rowIndex={nextPendingIndex}
+            row={state.rows[nextPendingIndex]}
+            targetEmailHeader={state.targetEmailHeader}
+            subjectTpl={state.subjectA}
+            bodyTpl={state.bodyA}
+            onSend={() => fireRow(nextPendingIndex)}
+            onSkip={() => skipRow(nextPendingIndex)}
+          />
+        )}
+      </div>
+    </div>
+  );
+}
+
+function NextRowPreview({
+  rowIndex, row, targetEmailHeader, subjectTpl, bodyTpl, onSend, onSkip,
+}: {
+  rowIndex: number;
+  row: Row | undefined;
+  targetEmailHeader: string;
+  subjectTpl: string;
+  bodyTpl: string;
+  onSend: () => void;
+  onSkip: () => void;
+}) {
+  const toAddr = (row?.[targetEmailHeader] ?? "").trim();
+  const subject = renderTemplate(subjectTpl, row);
+  const body = renderTemplate(bodyTpl, row);
+  const href = toAddr
+    ? `mailto:${toAddr}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`
+    : "";
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center justify-between">
+        <div className="font-mono-data text-xs text-muted-foreground">
+          Next up · row <span className="text-foreground">#{rowIndex}</span>
+        </div>
+      </div>
+      <div className="space-y-2 rounded-md border border-border-strong/60 bg-surface-2 p-3">
+        <div className="font-mono-data text-[11px]">
+          <span className="text-muted-foreground">To: </span>
+          <span className="text-foreground">{toAddr || <span className="text-destructive">— missing —</span>}</span>
+        </div>
+        <div className="font-mono-data text-[11px]">
+          <span className="text-muted-foreground">Subject: </span>
+          <span className="text-amber-glow">{subject || "—"}</span>
+        </div>
+        <pre className="max-h-48 overflow-auto whitespace-pre-wrap break-words rounded bg-bg-app p-2 font-mono-data text-[11px] leading-relaxed text-foreground">
+{body || "—"}
+        </pre>
+      </div>
+      <div className="flex justify-end gap-2">
+        <Button size="sm" variant="ghost" onClick={onSkip}>
+          <SkipForward className="size-3.5" /> Skip
+        </Button>
+        {href ? (
+          <Button
+            asChild
+            size="sm"
+            className="glow-amber bg-[var(--amber)] text-black hover:bg-[var(--amber)]/90"
+          >
+            <a href={href} onClick={onSend}>
+              <Send className="size-3.5" /> Send next
+            </a>
+          </Button>
+        ) : (
+          <Button size="sm" disabled>
+            <Send className="size-3.5" /> Send next
+          </Button>
         )}
       </div>
     </div>
