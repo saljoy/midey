@@ -297,11 +297,15 @@ function Index() {
   /* ---------- Section B: HTML preview + dual action ---------- */
 
   const sampleRow = state.rows[state.sampleIdB];
-  const renderedHtml = useMemo(() => renderTemplate(state.htmlB, sampleRow), [state.htmlB, sampleRow]);
+  const renderedHtml = useMemo(
+    () => autoFormatHtml(renderTemplate(state.htmlB, sampleRow)),
+    [state.htmlB, sampleRow],
+  );
   const renderedSubjectB = useMemo(() => renderTemplate(state.subjectB, sampleRow), [state.subjectB, sampleRow]);
 
   const executeHtml = useCallback(async () => {
-    if (!state.recipientB.trim()) { toast.error("Recipient required"); return; }
+    const recipients = cleanEmails(state.recipientB);
+    if (!recipients) { toast.error("Recipient required"); return; }
     try {
       const blobHtml = new Blob([renderedHtml], { type: "text/html" });
       const blobText = new Blob([renderedHtml.replace(/<[^>]+>/g, "")], { type: "text/plain" });
@@ -318,7 +322,7 @@ function Index() {
       return;
     }
     setTimeout(() => {
-      const href = `mailto:${encodeURIComponent(state.recipientB.trim())}?subject=${encodeURIComponent(renderedSubjectB)}`;
+      const href = `mailto:${recipients}?subject=${encodeURIComponent(renderedSubjectB)}`;
       window.location.href = href;
     }, 300);
   }, [state.recipientB, renderedHtml, renderedSubjectB]);
