@@ -545,7 +545,7 @@ function IngestPanel({
 /* --------------------------- Section A --------------------------- */
 
 function SectionACard({
-  state, patch, queue, processedCount, fireRow, skipRow, resetRow,
+  state, patch, queue, processedCount, fireRow, skipRow,
   executeTestHtml, renderedTestHtml, renderedTestSubject, sampleRow,
 }: {
   state: PersistedState;
