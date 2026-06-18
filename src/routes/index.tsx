@@ -11,7 +11,6 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
-import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import {
   Dialog, DialogContent, DialogDescription, DialogFooter,
   DialogHeader, DialogTitle, DialogTrigger,
@@ -46,6 +45,7 @@ interface PersistedState {
   subjectB: string;
   htmlB: string;
   templateSlotsA: { name: string; subject: string; body: string }[];
+  htmlMode: boolean;
 }
 
 const STORAGE_KEY = "midey.outreach.v1";
@@ -63,6 +63,7 @@ const DEFAULT_STATE: PersistedState = {
   subjectB: "A note for {first_name}",
   htmlB: "<div style=\"font-family:system-ui;line-height:1.55\">\n  <h2 style=\"color:#0ea5e9\">Hi {first_name} 👋</h2>\n  <p>Loved what you're doing at <b>{company}</b>.</p>\n  <p>— Midey Enterprises</p>\n</div>",
   templateSlotsA: [],
+  htmlMode: false,
 };
 
 /* --------------------------- Utilities --------------------------- */
@@ -302,35 +303,21 @@ function Index() {
           onTargetEmailHeader={(v) => patch({ targetEmailHeader: v })}
         />
 
-        <Tabs defaultValue="a" className="mt-6">
-          <TabsList className="grid w-full grid-cols-2">
-            <TabsTrigger value="a" className="gap-2"><Zap className="size-4" />Section A · Fast Plain</TabsTrigger>
-            <TabsTrigger value="b" className="gap-2"><Code2 className="size-4" />Section B · HTML Lab</TabsTrigger>
-          </TabsList>
-
-          <TabsContent value="a" className="mt-4 space-y-4">
-            <SectionACard
-              state={state}
-              patch={patch}
-              queue={queue}
-              processedCount={processedCount}
-              fireRow={fireRow}
-              skipRow={skipRow}
-              resetRow={resetRow}
-            />
-          </TabsContent>
-
-          <TabsContent value="b" className="mt-4 space-y-4">
-            <SectionBCard
-              state={state}
-              patch={patch}
-              renderedHtml={renderedHtml}
-              renderedSubject={renderedSubjectB}
-              onExecute={executeHtml}
-              sampleRow={sampleRow}
-            />
-          </TabsContent>
-        </Tabs>
+        <div className="mt-6 space-y-4">
+          <SectionACard
+            state={state}
+            patch={patch}
+            queue={queue}
+            processedCount={processedCount}
+            fireRow={fireRow}
+            skipRow={skipRow}
+            resetRow={resetRow}
+            executeTestHtml={executeHtml}
+            renderedTestHtml={renderedHtml}
+            renderedTestSubject={renderedSubjectB}
+            sampleRow={sampleRow}
+          />
+        </div>
       </main>
     </div>
   );
