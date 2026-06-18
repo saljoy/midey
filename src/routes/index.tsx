@@ -498,6 +498,7 @@ function IngestPanel({
 
 function SectionACard({
   state, patch, queue, processedCount, fireRow, skipRow,
+  executeTestHtml, renderedTestHtml, renderedTestSubject, sampleRow,
 }: {
   state: PersistedState;
   patch: (p: Partial<PersistedState>) => void;
@@ -506,6 +507,10 @@ function SectionACard({
   fireRow: (i: number) => void;
   skipRow: (i: number) => void;
   resetRow: (i: number) => void;
+  executeTestHtml: () => void;
+  renderedTestHtml: string;
+  renderedTestSubject: string;
+  sampleRow: Row | undefined;
 }) {
   const nextPendingIndex = queue.find(
     (i) => (state.rowStates[i] ?? "pending") === "pending",
@@ -520,12 +525,12 @@ function SectionACard({
     [state.rowStates],
   );
 
-  // Char counter for active row's mailto string
+  // Char counter for active row's mailto string (plain-text mode only)
   const previewRow = state.rows[nextPendingIndex ?? -1];
   const previewTo = (previewRow?.[state.targetEmailHeader] ?? "").trim();
   const previewSubject = renderTemplate(state.subjectA, previewRow);
   const previewBody = renderTemplate(state.bodyA, previewRow);
-  const mailtoLen = previewRow
+  const mailtoLen = previewRow && !state.htmlMode
     ? `mailto:${previewTo}?subject=${encodeURIComponent(previewSubject)}&body=${encodeURIComponent(previewBody)}`.length
     : 0;
   const overLimit = mailtoLen > 2000;
@@ -556,6 +561,20 @@ function SectionACard({
 
   return (
     <div className="space-y-4 rounded-xl border border-border-strong/70 bg-surface-1 p-4">
+      {/* HTML mode toggle */}
+      <label className="flex items-center justify-between gap-3 rounded-lg border border-border-strong/60 bg-surface-2 p-2.5">
+        <span className="flex items-center gap-2 font-mono-data text-[11px] uppercase tracking-wider text-muted-foreground">
+          <Code2 className="size-3.5" />
+          Use HTML template
+        </span>
+        <input
+          type="checkbox"
+          checked={state.htmlMode}
+          onChange={(e) => patch({ htmlMode: e.target.checked })}
+          className="size-4 accent-[var(--sky)]"
+        />
+      </label>
+
       {/* Template slot manager */}
       <div className="flex flex-wrap items-center gap-2 rounded-lg border border-border-strong/60 bg-surface-2 p-2">
         <span className="font-mono-data text-[10px] uppercase tracking-wider text-muted-foreground">
@@ -609,8 +628,10 @@ function SectionACard({
       <div className="grid gap-3 sm:grid-cols-2">
         <Field label="Subject template">
           <Input
-            value={state.subjectA}
-            onChange={(e) => patch({ subjectA: e.target.value })}
+            value={state.htmlMode ? state.subjectB : state.subjectA}
+            onChange={(e) =>
+              patch(state.htmlMode ? { subjectB: e.target.value } : { subjectA: e.target.value })
+            }
             className="font-mono-data"
             placeholder="Hi {first_name}…"
           />
@@ -624,18 +645,86 @@ function SectionACard({
           />
         </Field>
       </div>
-      <Field label="Plain-text body template">
-        <Textarea
-          value={state.bodyA}
-          onChange={(e) => patch({ bodyA: e.target.value })}
-          rows={6}
-          className="font-mono-data text-[13px]"
-          placeholder="Hi {first_name}, …"
-        />
-      </Field>
+      {state.htmlMode ? (
+        <>
+          <Field label="HTML code template">
+            <Textarea
+              value={state.htmlB}
+              onChange={(e) => patch({ htmlB: e.target.value })}
+              rows={8}
+              className="font-mono-data text-[12px] leading-relaxed"
+              spellCheck={false}
+              placeholder="<div>Hi {first_name}…</div>"
+            />
+          </Field>
+          <div>
+            <div className="mb-2 flex items-center gap-2">
+              <Eye className="size-3.5 text-muted-foreground" />
+              <span className="font-mono-data text-[10px] uppercase tracking-wider text-muted-foreground">
+                Live preview
+              </span>
+            </div>
+            <div className="overflow-hidden rounded-lg border border-border-strong/60 bg-white">
+              <iframe
+                title="HTML preview"
+                sandbox=""
+                srcDoc={`<!doctype html><html><body style="margin:0;padding:12px;font-family:system-ui">${renderTemplate(state.htmlB, previewRow ?? sampleRow)}</body></html>`}
+                className="block h-[300px] w-full"
+              />
+            </div>
+          </div>
+
+          {/* Test sandbox */}
+          <div className="space-y-2 rounded-lg border border-amber-glow/40 bg-amber-glow/5 p-3">
+            <div className="flex items-center gap-2 font-mono-data text-[10px] uppercase tracking-wider text-amber-glow">
+              <Zap className="size-3.5" /> Test sandbox · does not advance queue
+            </div>
+            <div className="grid gap-2 sm:grid-cols-2">
+              <Input
+                type="email"
+                value={state.recipientB}
+                onChange={(e) => patch({ recipientB: e.target.value })}
+                placeholder="manual test email"
+                className="h-9 font-mono-data text-xs"
+              />
+              <Input
+                type="number"
+                min={0}
+                max={Math.max(0, state.rows.length - 1)}
+                value={state.sampleIdB}
+                onChange={(e) => patch({ sampleIdB: Math.max(0, Number(e.target.value) || 0) })}
+                placeholder="sample row id"
+                className="h-9 font-mono-data text-xs"
+              />
+            </div>
+            <Button
+              size="sm"
+              onClick={executeTestHtml}
+              className="glow-amber w-full bg-[var(--amber)] text-black hover:bg-[var(--amber)]/90"
+            >
+              <Copy className="size-3.5" /> Send test draft
+            </Button>
+            <p className="font-mono-data text-[10px] text-muted-foreground">
+              Subject preview: <span className="text-amber-glow">{renderedTestSubject || "—"}</span>
+            </p>
+          </div>
+        </>
+      ) : (
+        <Field label="Plain-text body template">
+          <Textarea
+            value={state.bodyA}
+            onChange={(e) => patch({ bodyA: e.target.value })}
+            rows={6}
+            className="font-mono-data text-[13px]"
+            placeholder="Hi {first_name}, …"
+          />
+        </Field>
+      )}
       <div className="flex flex-wrap items-center justify-between gap-2 -mt-2">
         <span className="font-mono-data text-[11px] text-muted-foreground">
-          mailto length: <span className={overLimit ? "text-amber-glow" : "text-foreground"}>{mailtoLen.toLocaleString()}</span> chars
+          {state.htmlMode
+            ? "html mode · body sent via clipboard"
+            : <>mailto length: <span className={overLimit ? "text-amber-glow" : "text-foreground"}>{mailtoLen.toLocaleString()}</span> chars</>}
         </span>
         {overLimit && (
           <span className="inline-flex items-center gap-1 rounded-md border border-amber-glow/40 bg-amber-glow/10 px-2 py-0.5 font-mono-data text-[10px] text-amber-glow">
@@ -705,8 +794,10 @@ function SectionACard({
             rowIndex={nextPendingIndex}
             row={state.rows[nextPendingIndex]}
             targetEmailHeader={state.targetEmailHeader}
-            subjectTpl={state.subjectA}
+            subjectTpl={state.htmlMode ? state.subjectB : state.subjectA}
             bodyTpl={state.bodyA}
+            htmlMode={state.htmlMode}
+            htmlTpl={state.htmlB}
             onSend={() => fireRow(nextPendingIndex)}
             onSkip={() => skipRow(nextPendingIndex)}
           />
@@ -717,22 +808,48 @@ function SectionACard({
 }
 
 function NextRowPreview({
-  rowIndex, row, targetEmailHeader, subjectTpl, bodyTpl, onSend, onSkip,
+  rowIndex, row, targetEmailHeader, subjectTpl, bodyTpl, htmlMode, htmlTpl, onSend, onSkip,
 }: {
   rowIndex: number;
   row: Row | undefined;
   targetEmailHeader: string;
   subjectTpl: string;
   bodyTpl: string;
+  htmlMode: boolean;
+  htmlTpl: string;
   onSend: () => void;
   onSkip: () => void;
 }) {
   const toAddr = (row?.[targetEmailHeader] ?? "").trim();
   const subject = renderTemplate(subjectTpl, row);
   const body = renderTemplate(bodyTpl, row);
-  const href = toAddr
+  const renderedHtml = renderTemplate(htmlTpl, row);
+  const plainHref = toAddr
     ? `mailto:${toAddr}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`
     : "";
+  const htmlHref = toAddr
+    ? `mailto:${toAddr}?subject=${encodeURIComponent(subject)}`
+    : "";
+  const sendHtml = async () => {
+    if (!toAddr) return;
+    try {
+      const blobHtml = new Blob([renderedHtml], { type: "text/html" });
+      const blobText = new Blob([renderedHtml.replace(/<[^>]+>/g, "")], { type: "text/plain" });
+      if ("ClipboardItem" in window && navigator.clipboard?.write) {
+        await navigator.clipboard.write([
+          new ClipboardItem({ "text/html": blobHtml, "text/plain": blobText }),
+        ]);
+      } else {
+        await navigator.clipboard.writeText(renderedHtml);
+      }
+      toast.success("Rich HTML copied — opening mail in 300ms…");
+    } catch (e) {
+      toast.error(`Clipboard failed: ${(e as Error).message}`);
+      return;
+    }
+    onSend();
+    setTimeout(() => { window.location.href = htmlHref; }, 300);
+  };
   return (
     <div className="space-y-3">
       <div className="flex items-center justify-between">
@@ -749,27 +866,46 @@ function NextRowPreview({
           <span className="text-muted-foreground">Subject: </span>
           <span className="text-amber-glow">{subject || "—"}</span>
         </div>
+        {htmlMode ? (
+          <div className="overflow-hidden rounded border border-border-strong/40 bg-white">
+            <iframe
+              title="row html preview"
+              sandbox=""
+              srcDoc={`<!doctype html><html><body style="margin:0;padding:10px;font-family:system-ui">${renderedHtml}</body></html>`}
+              className="block h-40 w-full"
+            />
+          </div>
+        ) : (
         <pre className="max-h-48 overflow-auto whitespace-pre-wrap break-words rounded bg-bg-app p-2 font-mono-data text-[11px] leading-relaxed text-foreground">
 {body || "—"}
         </pre>
+        )}
       </div>
       <div className="flex justify-end gap-2">
         <Button size="sm" variant="ghost" onClick={onSkip}>
           <SkipForward className="size-3.5" /> Skip
         </Button>
-        {href ? (
+        {!toAddr ? (
+          <Button size="sm" disabled>
+            <Send className="size-3.5" /> Send next
+          </Button>
+        ) : htmlMode ? (
+          <Button
+            size="sm"
+            onClick={sendHtml}
+            className="glow-amber bg-[var(--amber)] text-black hover:bg-[var(--amber)]/90"
+          >
+            <Send className="size-3.5" /> Send next
+          </Button>
+        ) : (
           <Button
             asChild
             size="sm"
             className="glow-amber bg-[var(--amber)] text-black hover:bg-[var(--amber)]/90"
           >
-            <a href={href} onClick={onSend}>
+            <a href={plainHref} onClick={onSend}>
               <Send className="size-3.5" /> Send next
             </a>
-          </Button>
-        ) : (
-          <Button size="sm" disabled>
-            <Send className="size-3.5" /> Send next
           </Button>
         )}
       </div>
