@@ -1110,6 +1110,21 @@ function HtmlToolbar({
 
   const insertHr = () => replaceSelection(() => `<hr />`, "");
 
+  const insertBreak = () => {
+    const ta = textareaRef.current;
+    if (!ta) return;
+    const start = ta.selectionStart ?? value.length;
+    const end = ta.selectionEnd ?? value.length;
+    const ins = `<br />`;
+    const next = value.slice(0, start) + ins + value.slice(end);
+    onChange(next);
+    requestAnimationFrame(() => {
+      ta.focus();
+      const pos = start + ins.length;
+      ta.setSelectionRange(pos, pos);
+    });
+  };
+
   const btn =
     "inline-flex h-8 w-8 items-center justify-center rounded border border-border-strong/60 bg-surface-1 text-muted-foreground hover:bg-surface-2 hover:text-foreground transition-colors";
 
@@ -1170,6 +1185,7 @@ function HtmlToolbar({
 
       <button type="button" title="Insert link" className={btn} onClick={insertLink}><Link2 className="size-3.5" /></button>
       <button type="button" title="Horizontal rule" className={btn} onClick={insertHr}><Minus className="size-3.5" /></button>
+      <button type="button" title="Line break (<br />)" className={btn} onClick={insertBreak}><CornerDownLeft className="size-3.5" /></button>
     </div>
   );
 }
