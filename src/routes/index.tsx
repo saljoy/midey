@@ -934,7 +934,7 @@ function SectionACard({
 }
 
 function NextRowPreview({
-  rowIndex, row, targetEmailHeader, subjectTpl, bodyTpl, htmlMode, htmlTpl, onSend, onSkip,
+  rowIndex, row, targetEmailHeader, subjectTpl, bodyTpl, htmlMode, htmlTpl, onSend, onSkip, isResend,
 }: {
   rowIndex: number;
   row: Row | undefined;
@@ -945,11 +945,12 @@ function NextRowPreview({
   htmlTpl: string;
   onSend: () => void;
   onSkip: () => void;
+  isResend?: boolean;
 }) {
-  const toAddr = (row?.[targetEmailHeader] ?? "").trim();
+  const toAddr = cleanEmails(row?.[targetEmailHeader] ?? "");
   const subject = renderTemplate(subjectTpl, row);
   const body = renderTemplate(bodyTpl, row);
-  const renderedHtml = renderTemplate(htmlTpl, row);
+  const renderedHtml = autoFormatHtml(renderTemplate(htmlTpl, row));
   const plainHref = toAddr
     ? `mailto:${toAddr}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`
     : "";
@@ -980,7 +981,13 @@ function NextRowPreview({
     <div className="space-y-3">
       <div className="flex items-center justify-between">
         <div className="font-mono-data text-xs text-muted-foreground">
-          Next up · row <span className="text-foreground">#{rowIndex}</span>
+          {isResend ? "Resend · row " : "Next up · row "}
+          <span className="text-foreground">#{rowIndex}</span>
+          {isResend && (
+            <span className="ml-2 rounded border border-sky-glow/40 bg-sky-glow/10 px-1.5 py-0.5 text-[10px] text-sky-glow">
+              processed
+            </span>
+          )}
         </div>
       </div>
       <div className="space-y-2 rounded-md border border-border-strong/60 bg-surface-2 p-3">
