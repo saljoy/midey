@@ -651,11 +651,17 @@ function SectionACard({
       {state.htmlMode ? (
         <>
           <Field label="HTML code template">
+            <HtmlToolbar
+              textareaRef={htmlTextareaRef}
+              value={state.htmlB}
+              onChange={(v) => patch({ htmlB: v })}
+            />
             <Textarea
+              ref={htmlTextareaRef}
               value={state.htmlB}
               onChange={(e) => patch({ htmlB: e.target.value })}
               rows={8}
-              className="font-mono-data text-[12px] leading-relaxed"
+              className="font-mono-data text-[12px] leading-relaxed rounded-t-none border-t-0"
               spellCheck={false}
               placeholder="<div>Hi {first_name}…</div>"
             />
