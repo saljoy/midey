@@ -8,7 +8,7 @@ import {
   Zap, FileText, Eye, SkipForward, Save, AlertTriangle,
   Bold, Italic, Underline, Strikethrough, List, ListOrdered,
   AlignLeft, AlignCenter, AlignRight, AlignJustify, Link2, Minus,
-  Palette, Highlighter,
+  Palette, Highlighter, CornerDownLeft, RotateCcw,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -79,6 +79,47 @@ function renderTemplate(tpl: string, row: Row | undefined): string {
     const k = key.trim();
     return row[k] ?? "";
   });
+}
+
+/**
+ * Normalize an email cell that may contain multiple addresses
+ * separated by commas or semicolons (with stray whitespace).
+ * Returns a comma-joined, space-free string suitable for mailto:.
+ */
+function cleanEmails(raw: string): string {
+  return (raw || "")
+    .split(/[,;]+/)
+    .map((e) => e.trim())
+    .filter(Boolean)
+    .join(",");
+}
+
+/**
+ * Auto-format a raw HTML template so plain newlines in the editor
+ * become visible paragraph / line breaks in the rendered output.
+ * - Blank-line separated chunks → wrapped in <p>…</p>
+ * - Single \n inside a chunk → <br />
+ * - Chunks that already start with a block-level tag are left as-is.
+ */
+const BLOCK_RE =
+  /^\s*<(?:p|div|h[1-6]|ul|ol|li|table|thead|tbody|tr|td|th|blockquote|pre|hr|section|article|header|footer|nav|figure|figcaption|img|iframe|br)\b/i;
+
+function autoFormatHtml(src: string): string {
+  if (!src) return src;
+  const chunks = src.split(/\n{2,}/);
+  return chunks
+    .map((chunk) => {
+      const trimmed = chunk.trim();
+      if (!trimmed) return "";
+      if (BLOCK_RE.test(trimmed)) {
+        // Already starts with a block tag — preserve, but still convert
+        // bare single newlines inside to <br /> so layout matches editor.
+        return trimmed.replace(/\n/g, "<br />");
+      }
+      return `<p>${trimmed.replace(/\n/g, "<br />")}</p>`;
+    })
+    .filter(Boolean)
+    .join("\n");
 }
 
 function loadState(): PersistedState {
@@ -256,11 +297,15 @@ function Index() {
   /* ---------- Section B: HTML preview + dual action ---------- */
 
   const sampleRow = state.rows[state.sampleIdB];
-  const renderedHtml = useMemo(() => renderTemplate(state.htmlB, sampleRow), [state.htmlB, sampleRow]);
+  const renderedHtml = useMemo(
+    () => autoFormatHtml(renderTemplate(state.htmlB, sampleRow)),
+    [state.htmlB, sampleRow],
+  );
   const renderedSubjectB = useMemo(() => renderTemplate(state.subjectB, sampleRow), [state.subjectB, sampleRow]);
 
   const executeHtml = useCallback(async () => {
-    if (!state.recipientB.trim()) { toast.error("Recipient required"); return; }
+    const recipients = cleanEmails(state.recipientB);
+    if (!recipients) { toast.error("Recipient required"); return; }
     try {
       const blobHtml = new Blob([renderedHtml], { type: "text/html" });
       const blobText = new Blob([renderedHtml.replace(/<[^>]+>/g, "")], { type: "text/plain" });
@@ -277,7 +322,7 @@ function Index() {
       return;
     }
     setTimeout(() => {
-      const href = `mailto:${encodeURIComponent(state.recipientB.trim())}?subject=${encodeURIComponent(renderedSubjectB)}`;
+      const href = `mailto:${recipients}?subject=${encodeURIComponent(renderedSubjectB)}`;
       window.location.href = href;
     }, 300);
   }, [state.recipientB, renderedHtml, renderedSubjectB]);
@@ -515,9 +560,16 @@ function SectionACard({
   renderedTestSubject: string;
   sampleRow: Row | undefined;
 }) {
-  const nextPendingIndex = queue.find(
+  const firstPendingIndex = queue.find(
     (i) => (state.rowStates[i] ?? "pending") === "pending",
   );
+  // Manual override — "Jump to row" input or "Resend" button on a processed row.
+  const [activeOverride, setActiveOverride] = useState<number | null>(null);
+  const [jumpInput, setJumpInput] = useState<string>("");
+  const nextPendingIndex =
+    activeOverride !== null && state.rows[activeOverride]
+      ? activeOverride
+      : firstPendingIndex;
   const pendingCount = state.rows.length - processedCount;
   const [filter, setFilter] = useState<"all" | "active" | "processed">("all");
   const htmlTextareaRef = useRef<HTMLTextAreaElement>(null);
@@ -531,7 +583,7 @@ function SectionACard({
 
   // Char counter for active row's mailto string (plain-text mode only)
   const previewRow = state.rows[nextPendingIndex ?? -1];
-  const previewTo = (previewRow?.[state.targetEmailHeader] ?? "").trim();
+  const previewTo = cleanEmails(previewRow?.[state.targetEmailHeader] ?? "");
   const previewSubject = renderTemplate(state.subjectA, previewRow);
   const previewBody = renderTemplate(state.bodyA, previewRow);
   const mailtoLen = previewRow && !state.htmlMode
@@ -678,7 +730,7 @@ function SectionACard({
               <iframe
                 title="HTML preview"
                 sandbox=""
-                srcDoc={`<!doctype html><html><body style="margin:0;padding:12px;font-family:system-ui">${renderTemplate(state.htmlB, previewRow ?? sampleRow)}</body></html>`}
+                srcDoc={`<!doctype html><html><body style="margin:0;padding:12px;font-family:system-ui">${autoFormatHtml(renderTemplate(state.htmlB, previewRow ?? sampleRow))}</body></html>`}
                 className="block h-[300px] w-full"
               />
             </div>
@@ -754,21 +806,56 @@ function SectionACard({
       </div>
 
       {/* Quick queue filters */}
-      <div className="flex gap-1.5">
-        {(["all", "active", "processed"] as const).map((k) => (
-          <button
-            key={k}
-            type="button"
-            onClick={() => setFilter(k)}
-            className={`rounded-md border px-2.5 py-1 font-mono-data text-[11px] capitalize transition ${
-              filter === k
-                ? "border-sky-glow/60 bg-sky-glow/10 text-sky-glow glow-sky"
-                : "border-border-strong/60 bg-surface-2 text-muted-foreground hover:text-foreground"
-            }`}
-          >
-            {k === "active" ? "Active only" : k}
-          </button>
-        ))}
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="flex gap-1.5">
+          {(["all", "active", "processed"] as const).map((k) => (
+            <button
+              key={k}
+              type="button"
+              onClick={() => setFilter(k)}
+              className={`rounded-md border px-2.5 py-1 font-mono-data text-[11px] capitalize transition ${
+                filter === k
+                  ? "border-sky-glow/60 bg-sky-glow/10 text-sky-glow glow-sky"
+                  : "border-border-strong/60 bg-surface-2 text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              {k === "active" ? "Active only" : k}
+            </button>
+          ))}
+        </div>
+        <div className="flex items-center gap-1.5">
+          <label className="font-mono-data text-[10px] uppercase tracking-wider text-muted-foreground">
+            Jump to row #
+          </label>
+          <Input
+            type="number"
+            min={0}
+            max={Math.max(0, state.rows.length - 1)}
+            value={jumpInput}
+            onChange={(e) => {
+              const v = e.target.value;
+              setJumpInput(v);
+              if (v === "") { setActiveOverride(null); return; }
+              const n = Number(v);
+              if (Number.isFinite(n) && n >= 0 && n < state.rows.length) {
+                setActiveOverride(n);
+              }
+            }}
+            className="h-8 w-20 font-mono-data text-xs"
+            placeholder="0"
+            disabled={state.rows.length === 0}
+          />
+          {activeOverride !== null && (
+            <button
+              type="button"
+              onClick={() => { setActiveOverride(null); setJumpInput(""); }}
+              className="rounded-md border border-border-strong/60 bg-surface-2 px-2 py-1 font-mono-data text-[10px] text-muted-foreground hover:text-foreground"
+              title="Clear override · resume normal queue"
+            >
+              <RotateCcw className="inline size-3" /> reset
+            </button>
+          )}
+        </div>
       </div>
 
       <div className="overflow-hidden rounded-lg border border-border-strong/60 bg-bg-app p-4">
@@ -789,8 +876,24 @@ function SectionACard({
           ) : (
             <ul className="max-h-72 space-y-1 overflow-auto">
               {processedIndices.map((i) => (
-                <li key={i} className="flex items-center justify-between rounded border border-border-strong/40 bg-surface-2 px-2 py-1 font-mono-data text-[11px]">
-                  <span><span className="text-muted-foreground">#{i}</span> · <span className="text-foreground">{state.rows[i]?.[state.targetEmailHeader] ?? "—"}</span></span>
+                <li key={i} className="flex items-center justify-between gap-2 rounded border border-border-strong/40 bg-surface-2 px-2 py-1 font-mono-data text-[11px]">
+                  <span className="min-w-0 truncate">
+                    <span className="text-muted-foreground">#{i}</span> ·{" "}
+                    <span className="text-foreground">{state.rows[i]?.[state.targetEmailHeader] ?? "—"}</span>
+                  </span>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    className="h-6 px-2 text-sky-glow hover:bg-sky-glow/10"
+                    onClick={() => {
+                      setActiveOverride(i);
+                      setJumpInput(String(i));
+                      setFilter("all");
+                      toast.success(`Loaded row #${i} for resend`);
+                    }}
+                  >
+                    <RotateCcw className="size-3" /> Resend
+                  </Button>
                 </li>
               ))}
             </ul>
@@ -808,8 +911,21 @@ function SectionACard({
             bodyTpl={state.bodyA}
             htmlMode={state.htmlMode}
             htmlTpl={state.htmlB}
-            onSend={() => fireRow(nextPendingIndex)}
-            onSkip={() => skipRow(nextPendingIndex)}
+            onSend={() => {
+              fireRow(nextPendingIndex);
+              if (activeOverride !== null) {
+                setActiveOverride(null);
+                setJumpInput("");
+              }
+            }}
+            onSkip={() => {
+              skipRow(nextPendingIndex);
+              if (activeOverride !== null) {
+                setActiveOverride(null);
+                setJumpInput("");
+              }
+            }}
+            isResend={state.rowStates[nextPendingIndex] === "processed"}
           />
         )}
       </div>
@@ -818,7 +934,7 @@ function SectionACard({
 }
 
 function NextRowPreview({
-  rowIndex, row, targetEmailHeader, subjectTpl, bodyTpl, htmlMode, htmlTpl, onSend, onSkip,
+  rowIndex, row, targetEmailHeader, subjectTpl, bodyTpl, htmlMode, htmlTpl, onSend, onSkip, isResend,
 }: {
   rowIndex: number;
   row: Row | undefined;
@@ -829,11 +945,12 @@ function NextRowPreview({
   htmlTpl: string;
   onSend: () => void;
   onSkip: () => void;
+  isResend?: boolean;
 }) {
-  const toAddr = (row?.[targetEmailHeader] ?? "").trim();
+  const toAddr = cleanEmails(row?.[targetEmailHeader] ?? "");
   const subject = renderTemplate(subjectTpl, row);
   const body = renderTemplate(bodyTpl, row);
-  const renderedHtml = renderTemplate(htmlTpl, row);
+  const renderedHtml = autoFormatHtml(renderTemplate(htmlTpl, row));
   const plainHref = toAddr
     ? `mailto:${toAddr}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`
     : "";
@@ -864,7 +981,13 @@ function NextRowPreview({
     <div className="space-y-3">
       <div className="flex items-center justify-between">
         <div className="font-mono-data text-xs text-muted-foreground">
-          Next up · row <span className="text-foreground">#{rowIndex}</span>
+          {isResend ? "Resend · row " : "Next up · row "}
+          <span className="text-foreground">#{rowIndex}</span>
+          {isResend && (
+            <span className="ml-2 rounded border border-sky-glow/40 bg-sky-glow/10 px-1.5 py-0.5 text-[10px] text-sky-glow">
+              processed
+            </span>
+          )}
         </div>
       </div>
       <div className="space-y-2 rounded-md border border-border-strong/60 bg-surface-2 p-3">
@@ -987,6 +1110,21 @@ function HtmlToolbar({
 
   const insertHr = () => replaceSelection(() => `<hr />`, "");
 
+  const insertBreak = () => {
+    const ta = textareaRef.current;
+    if (!ta) return;
+    const start = ta.selectionStart ?? value.length;
+    const end = ta.selectionEnd ?? value.length;
+    const ins = `<br />`;
+    const next = value.slice(0, start) + ins + value.slice(end);
+    onChange(next);
+    requestAnimationFrame(() => {
+      ta.focus();
+      const pos = start + ins.length;
+      ta.setSelectionRange(pos, pos);
+    });
+  };
+
   const btn =
     "inline-flex h-8 w-8 items-center justify-center rounded border border-border-strong/60 bg-surface-1 text-muted-foreground hover:bg-surface-2 hover:text-foreground transition-colors";
 
@@ -1047,6 +1185,7 @@ function HtmlToolbar({
 
       <button type="button" title="Insert link" className={btn} onClick={insertLink}><Link2 className="size-3.5" /></button>
       <button type="button" title="Horizontal rule" className={btn} onClick={insertHr}><Minus className="size-3.5" /></button>
+      <button type="button" title="Line break (<br />)" className={btn} onClick={insertBreak}><CornerDownLeft className="size-3.5" /></button>
     </div>
   );
 }
