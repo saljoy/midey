@@ -6,6 +6,9 @@ import { toast } from "sonner";
 import {
   Upload, Sun, Moon, Trash2, Send, Mail, Code2, Copy,
   Zap, FileText, Eye, SkipForward, Save, AlertTriangle,
+  Bold, Italic, Underline, Strikethrough, List, ListOrdered,
+  AlignLeft, AlignCenter, AlignRight, AlignJustify, Link2, Minus,
+  Palette, Highlighter,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
