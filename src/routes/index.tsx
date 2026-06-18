@@ -545,7 +545,7 @@ function IngestPanel({
 /* --------------------------- Section A --------------------------- */
 
 function SectionACard({
-  state, patch, queue, processedCount, fireRow, skipRow,
+  state, patch, queue, processedCount, fireRow, skipRow, resetRow,
   executeTestHtml, renderedTestHtml, renderedTestSubject, sampleRow,
 }: {
   state: PersistedState;
@@ -560,9 +560,16 @@ function SectionACard({
   renderedTestSubject: string;
   sampleRow: Row | undefined;
 }) {
-  const nextPendingIndex = queue.find(
+  const firstPendingIndex = queue.find(
     (i) => (state.rowStates[i] ?? "pending") === "pending",
   );
+  // Manual override — "Jump to row" input or "Resend" button on a processed row.
+  const [activeOverride, setActiveOverride] = useState<number | null>(null);
+  const [jumpInput, setJumpInput] = useState<string>("");
+  const nextPendingIndex =
+    activeOverride !== null && state.rows[activeOverride]
+      ? activeOverride
+      : firstPendingIndex;
   const pendingCount = state.rows.length - processedCount;
   const [filter, setFilter] = useState<"all" | "active" | "processed">("all");
   const htmlTextareaRef = useRef<HTMLTextAreaElement>(null);
@@ -576,7 +583,7 @@ function SectionACard({
 
   // Char counter for active row's mailto string (plain-text mode only)
   const previewRow = state.rows[nextPendingIndex ?? -1];
-  const previewTo = (previewRow?.[state.targetEmailHeader] ?? "").trim();
+  const previewTo = cleanEmails(previewRow?.[state.targetEmailHeader] ?? "");
   const previewSubject = renderTemplate(state.subjectA, previewRow);
   const previewBody = renderTemplate(state.bodyA, previewRow);
   const mailtoLen = previewRow && !state.htmlMode
