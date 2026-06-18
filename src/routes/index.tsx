@@ -806,21 +806,56 @@ function SectionACard({
       </div>
 
       {/* Quick queue filters */}
-      <div className="flex gap-1.5">
-        {(["all", "active", "processed"] as const).map((k) => (
-          <button
-            key={k}
-            type="button"
-            onClick={() => setFilter(k)}
-            className={`rounded-md border px-2.5 py-1 font-mono-data text-[11px] capitalize transition ${
-              filter === k
-                ? "border-sky-glow/60 bg-sky-glow/10 text-sky-glow glow-sky"
-                : "border-border-strong/60 bg-surface-2 text-muted-foreground hover:text-foreground"
-            }`}
-          >
-            {k === "active" ? "Active only" : k}
-          </button>
-        ))}
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="flex gap-1.5">
+          {(["all", "active", "processed"] as const).map((k) => (
+            <button
+              key={k}
+              type="button"
+              onClick={() => setFilter(k)}
+              className={`rounded-md border px-2.5 py-1 font-mono-data text-[11px] capitalize transition ${
+                filter === k
+                  ? "border-sky-glow/60 bg-sky-glow/10 text-sky-glow glow-sky"
+                  : "border-border-strong/60 bg-surface-2 text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              {k === "active" ? "Active only" : k}
+            </button>
+          ))}
+        </div>
+        <div className="flex items-center gap-1.5">
+          <label className="font-mono-data text-[10px] uppercase tracking-wider text-muted-foreground">
+            Jump to row #
+          </label>
+          <Input
+            type="number"
+            min={0}
+            max={Math.max(0, state.rows.length - 1)}
+            value={jumpInput}
+            onChange={(e) => {
+              const v = e.target.value;
+              setJumpInput(v);
+              if (v === "") { setActiveOverride(null); return; }
+              const n = Number(v);
+              if (Number.isFinite(n) && n >= 0 && n < state.rows.length) {
+                setActiveOverride(n);
+              }
+            }}
+            className="h-8 w-20 font-mono-data text-xs"
+            placeholder="0"
+            disabled={state.rows.length === 0}
+          />
+          {activeOverride !== null && (
+            <button
+              type="button"
+              onClick={() => { setActiveOverride(null); setJumpInput(""); }}
+              className="rounded-md border border-border-strong/60 bg-surface-2 px-2 py-1 font-mono-data text-[10px] text-muted-foreground hover:text-foreground"
+              title="Clear override · resume normal queue"
+            >
+              <RotateCcw className="inline size-3" /> reset
+            </button>
+          )}
+        </div>
       </div>
 
       <div className="overflow-hidden rounded-lg border border-border-strong/60 bg-bg-app p-4">
@@ -841,8 +876,24 @@ function SectionACard({
           ) : (
             <ul className="max-h-72 space-y-1 overflow-auto">
               {processedIndices.map((i) => (
-                <li key={i} className="flex items-center justify-between rounded border border-border-strong/40 bg-surface-2 px-2 py-1 font-mono-data text-[11px]">
-                  <span><span className="text-muted-foreground">#{i}</span> · <span className="text-foreground">{state.rows[i]?.[state.targetEmailHeader] ?? "—"}</span></span>
+                <li key={i} className="flex items-center justify-between gap-2 rounded border border-border-strong/40 bg-surface-2 px-2 py-1 font-mono-data text-[11px]">
+                  <span className="min-w-0 truncate">
+                    <span className="text-muted-foreground">#{i}</span> ·{" "}
+                    <span className="text-foreground">{state.rows[i]?.[state.targetEmailHeader] ?? "—"}</span>
+                  </span>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    className="h-6 px-2 text-sky-glow hover:bg-sky-glow/10"
+                    onClick={() => {
+                      setActiveOverride(i);
+                      setJumpInput(String(i));
+                      setFilter("all");
+                      toast.success(`Loaded row #${i} for resend`);
+                    }}
+                  >
+                    <RotateCcw className="size-3" /> Resend
+                  </Button>
                 </li>
               ))}
             </ul>
@@ -860,8 +911,21 @@ function SectionACard({
             bodyTpl={state.bodyA}
             htmlMode={state.htmlMode}
             htmlTpl={state.htmlB}
-            onSend={() => fireRow(nextPendingIndex)}
-            onSkip={() => skipRow(nextPendingIndex)}
+            onSend={() => {
+              fireRow(nextPendingIndex);
+              if (activeOverride !== null) {
+                setActiveOverride(null);
+                setJumpInput("");
+              }
+            }}
+            onSkip={() => {
+              skipRow(nextPendingIndex);
+              if (activeOverride !== null) {
+                setActiveOverride(null);
+                setJumpInput("");
+              }
+            }}
+            isResend={state.rowStates[nextPendingIndex] === "processed"}
           />
         )}
       </div>
