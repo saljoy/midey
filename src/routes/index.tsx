@@ -520,6 +520,7 @@ function SectionACard({
   );
   const pendingCount = state.rows.length - processedCount;
   const [filter, setFilter] = useState<"all" | "active" | "processed">("all");
+  const htmlTextareaRef = useRef<HTMLTextAreaElement>(null);
   const processedIndices = useMemo(
     () => Object.entries(state.rowStates)
       .filter(([, v]) => v === "processed")
