@@ -730,7 +730,7 @@ function SectionACard({
               <iframe
                 title="HTML preview"
                 sandbox=""
-                srcDoc={`<!doctype html><html><body style="margin:0;padding:12px;font-family:system-ui">${renderTemplate(state.htmlB, previewRow ?? sampleRow)}</body></html>`}
+                srcDoc={`<!doctype html><html><body style="margin:0;padding:12px;font-family:system-ui">${autoFormatHtml(renderTemplate(state.htmlB, previewRow ?? sampleRow))}</body></html>`}
                 className="block h-[300px] w-full"
               />
             </div>
