@@ -935,3 +935,118 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
     </div>
   );
 }
+
+/* --------------------------- HTML Toolbar --------------------------- */
+
+function HtmlToolbar({
+  textareaRef, value, onChange,
+}: {
+  textareaRef: React.RefObject<HTMLTextAreaElement | null>;
+  value: string;
+  onChange: (v: string) => void;
+}) {
+  const replaceSelection = useCallback(
+    (transform: (sel: string) => string, fallback = "text") => {
+      const ta = textareaRef.current;
+      if (!ta) return;
+      const start = ta.selectionStart ?? value.length;
+      const end = ta.selectionEnd ?? value.length;
+      const sel = value.slice(start, end) || fallback;
+      const out = transform(sel);
+      const next = value.slice(0, start) + out + value.slice(end);
+      onChange(next);
+      requestAnimationFrame(() => {
+        ta.focus();
+        ta.setSelectionRange(start, start + out.length);
+      });
+    },
+    [textareaRef, value, onChange],
+  );
+
+  const wrap = (open: string, close: string) =>
+    replaceSelection((s) => `${open}${s}${close}`);
+
+  const makeList = (ordered: boolean) =>
+    replaceSelection((s) => {
+      const tag = ordered ? "ol" : "ul";
+      const items = s.split(/\r?\n/).filter(Boolean).map((l) => `  <li>${l}</li>`).join("\n");
+      return `<${tag}>\n${items || "  <li>item</li>"}\n</${tag}>`;
+    }, "item 1\nitem 2");
+
+  const align = (a: "left" | "center" | "right" | "justify") =>
+    replaceSelection((s) => `<div style="text-align:${a}">${s}</div>`);
+
+  const fontSize = (px: string) =>
+    replaceSelection((s) => `<span style="font-size:${px}">${s}</span>`);
+
+  const insertLink = () => {
+    const url = window.prompt("Link URL", "https://");
+    if (!url) return;
+    replaceSelection((s) => `<a href="${url}">${s}</a>`, "link text");
+  };
+
+  const insertHr = () => replaceSelection(() => `<hr />`, "");
+
+  const btn =
+    "inline-flex h-8 w-8 items-center justify-center rounded border border-border-strong/60 bg-surface-1 text-muted-foreground hover:bg-surface-2 hover:text-foreground transition-colors";
+
+  return (
+    <div className="flex flex-wrap items-center gap-1 rounded-t-md border border-b-0 border-border-strong/60 bg-surface-2/40 p-1.5">
+      <button type="button" title="Bold" className={btn} onClick={() => wrap("<strong>", "</strong>")}><Bold className="size-3.5" /></button>
+      <button type="button" title="Italic" className={btn} onClick={() => wrap("<em>", "</em>")}><Italic className="size-3.5" /></button>
+      <button type="button" title="Underline" className={btn} onClick={() => wrap(`<span style="text-decoration: underline;">`, "</span>")}><Underline className="size-3.5" /></button>
+      <button type="button" title="Strikethrough" className={btn} onClick={() => wrap("<del>", "</del>")}><Strikethrough className="size-3.5" /></button>
+
+      <span className="mx-1 h-5 w-px bg-border-strong/60" />
+
+      <label title="Text color" className={`${btn} relative cursor-pointer`}>
+        <Palette className="size-3.5" />
+        <input
+          type="color"
+          className="absolute inset-0 cursor-pointer opacity-0"
+          onChange={(e) => wrap(`<span style="color:${e.target.value}">`, "</span>")}
+        />
+      </label>
+      <label title="Highlight color" className={`${btn} relative cursor-pointer`}>
+        <Highlighter className="size-3.5" />
+        <input
+          type="color"
+          className="absolute inset-0 cursor-pointer opacity-0"
+          onChange={(e) => wrap(`<span style="background-color:${e.target.value}">`, "</span>")}
+        />
+      </label>
+
+      <span className="mx-1 h-5 w-px bg-border-strong/60" />
+
+      <select
+        title="Font size"
+        defaultValue=""
+        onChange={(e) => { if (e.target.value) { fontSize(e.target.value); e.target.value = ""; } }}
+        className="h-8 rounded border border-border-strong/60 bg-surface-1 px-1.5 font-mono-data text-[11px] text-muted-foreground hover:text-foreground"
+      >
+        <option value="" disabled>Size</option>
+        <option value="12px">Small</option>
+        <option value="14px">Normal</option>
+        <option value="18px">Large</option>
+        <option value="24px">Huge</option>
+      </select>
+
+      <span className="mx-1 h-5 w-px bg-border-strong/60" />
+
+      <button type="button" title="Bulleted list" className={btn} onClick={() => makeList(false)}><List className="size-3.5" /></button>
+      <button type="button" title="Numbered list" className={btn} onClick={() => makeList(true)}><ListOrdered className="size-3.5" /></button>
+
+      <span className="mx-1 h-5 w-px bg-border-strong/60" />
+
+      <button type="button" title="Align left" className={btn} onClick={() => align("left")}><AlignLeft className="size-3.5" /></button>
+      <button type="button" title="Align center" className={btn} onClick={() => align("center")}><AlignCenter className="size-3.5" /></button>
+      <button type="button" title="Align right" className={btn} onClick={() => align("right")}><AlignRight className="size-3.5" /></button>
+      <button type="button" title="Justify" className={btn} onClick={() => align("justify")}><AlignJustify className="size-3.5" /></button>
+
+      <span className="mx-1 h-5 w-px bg-border-strong/60" />
+
+      <button type="button" title="Insert link" className={btn} onClick={insertLink}><Link2 className="size-3.5" /></button>
+      <button type="button" title="Horizontal rule" className={btn} onClick={insertHr}><Minus className="size-3.5" /></button>
+    </div>
+  );
+}
