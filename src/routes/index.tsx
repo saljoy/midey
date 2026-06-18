@@ -81,6 +81,47 @@ function renderTemplate(tpl: string, row: Row | undefined): string {
   });
 }
 
+/**
+ * Normalize an email cell that may contain multiple addresses
+ * separated by commas or semicolons (with stray whitespace).
+ * Returns a comma-joined, space-free string suitable for mailto:.
+ */
+function cleanEmails(raw: string): string {
+  return (raw || "")
+    .split(/[,;]+/)
+    .map((e) => e.trim())
+    .filter(Boolean)
+    .join(",");
+}
+
+/**
+ * Auto-format a raw HTML template so plain newlines in the editor
+ * become visible paragraph / line breaks in the rendered output.
+ * - Blank-line separated chunks → wrapped in <p>…</p>
+ * - Single \n inside a chunk → <br />
+ * - Chunks that already start with a block-level tag are left as-is.
+ */
+const BLOCK_RE =
+  /^\s*<(?:p|div|h[1-6]|ul|ol|li|table|thead|tbody|tr|td|th|blockquote|pre|hr|section|article|header|footer|nav|figure|figcaption|img|iframe|br)\b/i;
+
+function autoFormatHtml(src: string): string {
+  if (!src) return src;
+  const chunks = src.split(/\n{2,}/);
+  return chunks
+    .map((chunk) => {
+      const trimmed = chunk.trim();
+      if (!trimmed) return "";
+      if (BLOCK_RE.test(trimmed)) {
+        // Already starts with a block tag — preserve, but still convert
+        // bare single newlines inside to <br /> so layout matches editor.
+        return trimmed.replace(/\n/g, "<br />");
+      }
+      return `<p>${trimmed.replace(/\n/g, "<br />")}</p>`;
+    })
+    .filter(Boolean)
+    .join("\n");
+}
+
 function loadState(): PersistedState {
   if (typeof window === "undefined") return DEFAULT_STATE;
   try {
