@@ -8,7 +8,7 @@ import {
   Zap, FileText, Eye, SkipForward, Save, AlertTriangle,
   Bold, Italic, Underline, Strikethrough, List, ListOrdered,
   AlignLeft, AlignCenter, AlignRight, AlignJustify, Link2, Minus,
-  Palette, Highlighter,
+  Palette, Highlighter, CornerDownLeft, RotateCcw,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
