@@ -327,6 +327,21 @@ function Index() {
     }, 300);
   }, [state.recipientB, renderedHtml, renderedSubjectB]);
 
+  /* Plain-text test sandbox: uses sample row + manual recipient, opens mailto with subject+body. */
+  const renderedSubjectAPreview = useMemo(
+    () => renderTemplate(state.subjectA, sampleRow),
+    [state.subjectA, sampleRow],
+  );
+  const executePlainTest = useCallback(() => {
+    const recipients = cleanEmails(state.recipientB);
+    if (!recipients) { toast.error("Recipient required"); return; }
+    const subject = renderTemplate(state.subjectA, sampleRow);
+    const body = renderTemplate(state.bodyA, sampleRow);
+    const href = `mailto:${recipients}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+    toast.success("Opening test draft…");
+    window.location.href = href;
+  }, [state.recipientB, state.subjectA, state.bodyA, sampleRow]);
+
   /* ---------- UI ---------- */
 
   return (
@@ -363,6 +378,8 @@ function Index() {
             executeTestHtml={executeHtml}
             renderedTestHtml={renderedHtml}
             renderedTestSubject={renderedSubjectB}
+            executeTestPlain={executePlainTest}
+            renderedTestSubjectPlain={renderedSubjectAPreview}
             sampleRow={sampleRow}
           />
         </div>
