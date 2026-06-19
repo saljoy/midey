@@ -564,6 +564,7 @@ function IngestPanel({
 function SectionACard({
   state, patch, queue, processedCount, fireRow, skipRow,
   executeTestHtml, renderedTestHtml, renderedTestSubject, sampleRow,
+  executeTestPlain, renderedTestSubjectPlain,
 }: {
   state: PersistedState;
   patch: (p: Partial<PersistedState>) => void;
@@ -575,6 +576,8 @@ function SectionACard({
   executeTestHtml: () => void;
   renderedTestHtml: string;
   renderedTestSubject: string;
+  executeTestPlain: () => void;
+  renderedTestSubjectPlain: string;
   sampleRow: Row | undefined;
 }) {
   const firstPendingIndex = queue.find(
