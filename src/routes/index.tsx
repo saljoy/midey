@@ -327,6 +327,21 @@ function Index() {
     }, 300);
   }, [state.recipientB, renderedHtml, renderedSubjectB]);
 
+  /* Plain-text test sandbox: uses sample row + manual recipient, opens mailto with subject+body. */
+  const renderedSubjectAPreview = useMemo(
+    () => renderTemplate(state.subjectA, sampleRow),
+    [state.subjectA, sampleRow],
+  );
+  const executePlainTest = useCallback(() => {
+    const recipients = cleanEmails(state.recipientB);
+    if (!recipients) { toast.error("Recipient required"); return; }
+    const subject = renderTemplate(state.subjectA, sampleRow);
+    const body = renderTemplate(state.bodyA, sampleRow);
+    const href = `mailto:${recipients}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+    toast.success("Opening test draft…");
+    window.location.href = href;
+  }, [state.recipientB, state.subjectA, state.bodyA, sampleRow]);
+
   /* ---------- UI ---------- */
 
   return (
@@ -363,6 +378,8 @@ function Index() {
             executeTestHtml={executeHtml}
             renderedTestHtml={renderedHtml}
             renderedTestSubject={renderedSubjectB}
+            executeTestPlain={executePlainTest}
+            renderedTestSubjectPlain={renderedSubjectAPreview}
             sampleRow={sampleRow}
           />
         </div>
@@ -547,6 +564,7 @@ function IngestPanel({
 function SectionACard({
   state, patch, queue, processedCount, fireRow, skipRow,
   executeTestHtml, renderedTestHtml, renderedTestSubject, sampleRow,
+  executeTestPlain, renderedTestSubjectPlain,
 }: {
   state: PersistedState;
   patch: (p: Partial<PersistedState>) => void;
@@ -558,6 +576,8 @@ function SectionACard({
   executeTestHtml: () => void;
   renderedTestHtml: string;
   renderedTestSubject: string;
+  executeTestPlain: () => void;
+  renderedTestSubjectPlain: string;
   sampleRow: Row | undefined;
 }) {
   const firstPendingIndex = queue.find(
@@ -785,15 +805,52 @@ function SectionACard({
           </div>
         </>
       ) : (
-        <Field label="Plain-text body template">
-          <Textarea
-            value={state.bodyA}
-            onChange={(e) => patch({ bodyA: e.target.value })}
-            rows={6}
-            className="font-mono-data text-[13px]"
-            placeholder="Hi {first_name}, …"
-          />
-        </Field>
+        <>
+          <Field label="Plain-text body template">
+            <Textarea
+              value={state.bodyA}
+              onChange={(e) => patch({ bodyA: e.target.value })}
+              rows={6}
+              className="font-mono-data text-[13px]"
+              placeholder="Hi {first_name}, …"
+            />
+          </Field>
+
+          {/* Test sandbox · plain text */}
+          <div className="space-y-2 rounded-lg border border-amber-glow/40 bg-amber-glow/5 p-3">
+            <div className="flex items-center gap-2 font-mono-data text-[10px] uppercase tracking-wider text-amber-glow">
+              <Zap className="size-3.5" /> Test sandbox · does not advance queue
+            </div>
+            <div className="grid gap-2 sm:grid-cols-2">
+              <Input
+                type="email"
+                value={state.recipientB}
+                onChange={(e) => patch({ recipientB: e.target.value })}
+                placeholder="manual test email"
+                className="h-9 font-mono-data text-xs"
+              />
+              <Input
+                type="number"
+                min={0}
+                max={Math.max(0, state.rows.length - 1)}
+                value={state.sampleIdB}
+                onChange={(e) => patch({ sampleIdB: Math.max(0, Number(e.target.value) || 0) })}
+                placeholder="sample row id"
+                className="h-9 font-mono-data text-xs"
+              />
+            </div>
+            <Button
+              size="sm"
+              onClick={executeTestPlain}
+              className="glow-amber w-full bg-[var(--amber)] text-black hover:bg-[var(--amber)]/90"
+            >
+              <Copy className="size-3.5" /> Send test draft
+            </Button>
+            <p className="font-mono-data text-[10px] text-muted-foreground">
+              Subject preview: <span className="text-amber-glow">{renderedTestSubjectPlain || "—"}</span>
+            </p>
+          </div>
+        </>
       )}
       <div className="flex flex-wrap items-center justify-between gap-2 -mt-2">
         <span className="font-mono-data text-[11px] text-muted-foreground">
