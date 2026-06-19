@@ -573,6 +573,7 @@ function SectionACard({
   const pendingCount = state.rows.length - processedCount;
   const [filter, setFilter] = useState<"all" | "active" | "processed">("all");
   const htmlTextareaRef = useRef<HTMLTextAreaElement>(null);
+  const [processedSearch, setProcessedSearch] = useState("");
   const processedIndices = useMemo(
     () => Object.entries(state.rowStates)
       .filter(([, v]) => v === "processed")
@@ -580,6 +581,18 @@ function SectionACard({
       .sort((a, b) => a - b),
     [state.rowStates],
   );
+  const filteredProcessedIndices = useMemo(() => {
+    const q = processedSearch.trim().toLowerCase();
+    if (!q) return processedIndices;
+    return processedIndices.filter((i) => {
+      if (String(i).includes(q)) return true;
+      const row = state.rows[i];
+      if (!row) return false;
+      const email = String(row[state.targetEmailHeader] ?? "").toLowerCase();
+      if (email.includes(q)) return true;
+      return Object.values(row).some((v) => String(v ?? "").toLowerCase().includes(q));
+    });
+  }, [processedSearch, processedIndices, state.rows, state.targetEmailHeader]);
 
   // Char counter for active row's mailto string (plain-text mode only)
   const previewRow = state.rows[nextPendingIndex ?? -1];
@@ -874,8 +887,20 @@ function SectionACard({
               No rows processed yet.
             </p>
           ) : (
-            <ul className="max-h-72 space-y-1 overflow-auto">
-              {processedIndices.map((i) => (
+            <div className="space-y-2">
+              <Input
+                value={processedSearch}
+                onChange={(e) => setProcessedSearch(e.target.value)}
+                placeholder="Search processed by email, row #, or any field…"
+                className="h-8 font-mono-data text-xs"
+              />
+              {filteredProcessedIndices.length === 0 ? (
+                <p className="py-4 text-center font-mono-data text-xs text-muted-foreground">
+                  No matches for "{processedSearch}".
+                </p>
+              ) : (
+                <ul className="max-h-72 space-y-1 overflow-auto">
+                  {filteredProcessedIndices.map((i) => (
                 <li key={i} className="flex items-center justify-between gap-2 rounded border border-border-strong/40 bg-surface-2 px-2 py-1 font-mono-data text-[11px]">
                   <span className="min-w-0 truncate">
                     <span className="text-muted-foreground">#{i}</span> ·{" "}
@@ -895,8 +920,10 @@ function SectionACard({
                     <RotateCcw className="size-3" /> Resend
                   </Button>
                 </li>
-              ))}
-            </ul>
+                  ))}
+                </ul>
+              )}
+            </div>
           )
         ) : nextPendingIndex === undefined ? (
           <p className="py-6 text-center font-mono-data text-xs text-muted-foreground">
