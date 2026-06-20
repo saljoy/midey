@@ -252,7 +252,43 @@ function Index() {
   useEffect(() => {
     if (!hydrated) return;
     const id = setTimeout(() => {
-      try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); } catch {}
+      try {
+        // Slim persistence: keep templates / settings / row states fully,
+        // but trim each row to only the columns referenced by templates
+        // plus the target email column. Avoids blowing past the ~5MB
+        // localStorage quota on lightweight mobile browsers.
+        const referenced = new Set<string>();
+        if (state.targetEmailHeader) referenced.add(state.targetEmailHeader);
+        const harvest = (tpl: string) => {
+          const re = /\{([^{}]+)\}/g;
+          let m: RegExpExecArray | null;
+          while ((m = re.exec(tpl)) !== null) referenced.add(m[1].trim());
+        };
+        harvest(state.subjectA);
+        harvest(state.bodyA);
+        harvest(state.subjectB);
+        harvest(state.htmlB);
+        for (const slot of state.templateSlotsA) {
+          harvest(slot.subject);
+          harvest(slot.body);
+        }
+        const slimRows: Row[] = state.rows.map((r) => {
+          const out: Row = {};
+          for (const k of referenced) if (r[k] !== undefined) out[k] = r[k];
+          return out;
+        });
+        const slim = { ...state, rows: slimRows };
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(slim));
+      } catch {
+        // Quota errors on tiny WebViews — drop rows entirely, keep settings.
+        try {
+          const { rows: _omit, ...settings } = state;
+          void _omit;
+          localStorage.setItem(STORAGE_KEY, JSON.stringify({ ...settings, rows: [] }));
+        } catch {
+          /* give up silently */
+        }
+      }
     }, 150);
     return () => clearTimeout(id);
   }, [state, hydrated]);
@@ -281,13 +317,15 @@ function Index() {
     let headers: string[] = [];
     const total = file.size || 1;
 
+    const useWorker = workersSupported();
     Papa.parse<Row>(file, {
       header: true,
       skipEmptyLines: true,
-      // NOTE: worker:true + chunk callback is unreliable in some browsers
-      // (cursor never updates → progress stuck at 0%, complete never fires).
-      // Stream on the main thread in 1MB chunks; React state updates
-      // between chunks keep the UI responsive even for 50MB+ files.
+      // Use a Web Worker when the runtime supports it; lightweight
+      // mobile browsers (Via, some Android WebViews) block workers,
+      // so we fall back to synchronous main-thread streaming instead
+      // of stalling on "Parsing data payload".
+      worker: useWorker,
       chunkSize: 1024 * 1024,
       chunk: (results, parser) => {
         if (!headers.length && results.meta.fields) {
