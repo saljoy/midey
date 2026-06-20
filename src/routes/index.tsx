@@ -22,9 +22,9 @@ import {
 export const Route = createFileRoute("/")({
   head: () => ({
     meta: [
-      { title: "Midey Enterprises Outreach Lab" },
+      { title: "Wayne Enterprises Outreach Lab" },
       { name: "description", content: "High-performance mobile outreach console: parse 50MB+ CSV lead lists, fire personalized mailto handoffs, and craft rich HTML drafts — all 100% client-side." },
-      { property: "og:title", content: "Midey Enterprises Outreach Lab" },
+      { property: "og:title", content: "Wayne Enterprises Outreach Lab" },
       { property: "og:description", content: "Client-side outreach dashboard for rapid, templated email handoffs from massive CSV lead lists." },
     ],
   }),
@@ -60,11 +60,11 @@ const DEFAULT_STATE: PersistedState = {
   rowStates: {},
   targetEmailHeader: "",
   subjectA: "Quick question, {first_name}",
-  bodyA: "Hi {first_name},\n\nNoticed {company} — wanted to reach out.\n\n— Midey",
+  bodyA: "Hi {first_name},\n\nNoticed {company} — wanted to reach out.\n\n— Wayne",
   recipientB: "",
   sampleIdB: 0,
   subjectB: "A note for {first_name}",
-  htmlB: "<div style=\"font-family:system-ui;line-height:1.55\">\n  <h2 style=\"color:#0ea5e9\">Hi {first_name} 👋</h2>\n  <p>Loved what you're doing at <b>{company}</b>.</p>\n  <p>— Midey Enterprises</p>\n</div>",
+  htmlB: "<div style=\"font-family:system-ui;line-height:1.55\">\n  <h2 style=\"color:#0ea5e9\">Hi {first_name} 👋</h2>\n  <p>Loved what you're doing at <b>{company}</b>.</p>\n  <p>— Wayne Enterprises</p>\n</div>",
   templateSlotsA: [],
   htmlMode: false,
 };
@@ -92,6 +92,34 @@ function cleanEmails(raw: string): string {
     .map((e) => e.trim())
     .filter(Boolean)
     .join(",");
+}
+
+/**
+ * Split a multi-email cell into a primary "To:" address and any
+ * remaining addresses to be BCC'd. Returns empty strings when no
+ * recipients are present.
+ */
+function splitToBcc(raw: string): { to: string; bcc: string } {
+  const list = (raw || "")
+    .split(/[,;]+/)
+    .map((e) => e.trim())
+    .filter(Boolean);
+  if (list.length === 0) return { to: "", bcc: "" };
+  return { to: list[0], bcc: list.slice(1).join(",") };
+}
+
+/**
+ * Build a mailto: URL where the first address goes in the To field
+ * and any extra addresses are hidden in BCC.
+ */
+function buildMailto(rawRecipients: string, params: Record<string, string>): string {
+  const { to, bcc } = splitToBcc(rawRecipients);
+  const qs: string[] = [];
+  if (bcc) qs.push(`bcc=${encodeURIComponent(bcc)}`);
+  for (const [k, v] of Object.entries(params)) {
+    if (v !== undefined && v !== "") qs.push(`${k}=${encodeURIComponent(v)}`);
+  }
+  return `mailto:${to}${qs.length ? `?${qs.join("&")}` : ""}`;
 }
 
 /**
@@ -322,8 +350,7 @@ function Index() {
       return;
     }
     setTimeout(() => {
-      const href = `mailto:${recipients}?subject=${encodeURIComponent(renderedSubjectB)}`;
-      window.location.href = href;
+      window.location.href = buildMailto(state.recipientB, { subject: renderedSubjectB });
     }, 300);
   }, [state.recipientB, renderedHtml, renderedSubjectB]);
 
@@ -337,9 +364,8 @@ function Index() {
     if (!recipients) { toast.error("Recipient required"); return; }
     const subject = renderTemplate(state.subjectA, sampleRow);
     const body = renderTemplate(state.bodyA, sampleRow);
-    const href = `mailto:${recipients}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
     toast.success("Opening test draft…");
-    window.location.href = href;
+    window.location.href = buildMailto(state.recipientB, { subject, body });
   }, [state.recipientB, state.subjectA, state.bodyA, sampleRow]);
 
   /* ---------- UI ---------- */
@@ -409,7 +435,7 @@ function Header({
           </div>
           <div className="min-w-0">
             <h1 className="truncate text-sm font-semibold leading-tight sm:text-base">
-              Midey Enterprises <span className="text-sky-glow">Outreach Lab</span>
+              Wayne Enterprises <span className="text-sky-glow">Outreach Lab</span>
             </h1>
             <p className="truncate font-mono-data text-[10px] text-muted-foreground sm:text-xs">
               {processedRows.toLocaleString()} / {totalRows.toLocaleString()} processed
@@ -594,6 +620,7 @@ function SectionACard({
   const [filter, setFilter] = useState<"all" | "active" | "processed">("all");
   const htmlTextareaRef = useRef<HTMLTextAreaElement>(null);
   const [processedSearch, setProcessedSearch] = useState("");
+  const [queueSearch, setQueueSearch] = useState("");
   const processedIndices = useMemo(
     () => Object.entries(state.rowStates)
       .filter(([, v]) => v === "processed")
@@ -613,6 +640,21 @@ function SectionACard({
       return Object.values(row).some((v) => String(v ?? "").toLowerCase().includes(q));
     });
   }, [processedSearch, processedIndices, state.rows, state.targetEmailHeader]);
+
+  /* Active queue email search — matches across all rows respecting the
+   * current filter (all / active). Processed mode uses processedSearch. */
+  const queueSearchMatches = useMemo(() => {
+    const q = queueSearch.trim().toLowerCase();
+    if (!q) return [] as number[];
+    const matches: number[] = [];
+    for (let i = 0; i < state.rows.length; i++) {
+      if (filter === "active" && state.rowStates[i] === "processed") continue;
+      const email = String(state.rows[i]?.[state.targetEmailHeader] ?? "").toLowerCase();
+      if (email.includes(q) || String(i).includes(q)) matches.push(i);
+      if (matches.length >= 50) break;
+    }
+    return matches;
+  }, [queueSearch, state.rows, state.rowStates, state.targetEmailHeader, filter]);
 
   // Char counter for active row's mailto string (plain-text mode only)
   const previewRow = state.rows[nextPendingIndex ?? -1];
@@ -928,6 +970,66 @@ function SectionACard({
         </div>
       </div>
 
+      {/* Active queue email search */}
+      {filter !== "processed" && state.rows.length > 0 && (
+        <div className="space-y-2">
+          <Input
+            value={queueSearch}
+            onChange={(e) => setQueueSearch(e.target.value)}
+            placeholder="Search by Email…"
+            className="h-8 font-mono-data text-xs"
+          />
+          {queueSearch.trim() && (
+            <div className="rounded-md border border-border-strong/60 bg-surface-2 p-2">
+              {queueSearchMatches.length === 0 ? (
+                <p className="py-2 text-center font-mono-data text-[11px] text-muted-foreground">
+                  No matches for "{queueSearch}".
+                </p>
+              ) : (
+                <ul className="max-h-56 space-y-1 overflow-auto">
+                  {queueSearchMatches.map((i) => {
+                    const isProcessed = state.rowStates[i] === "processed";
+                    return (
+                      <li
+                        key={i}
+                        className={`flex items-center justify-between gap-2 rounded border border-border-strong/40 bg-bg-app px-2 py-1 font-mono-data text-[11px] ${
+                          isProcessed ? "opacity-60" : ""
+                        }`}
+                      >
+                        <span className="min-w-0 truncate">
+                          <span className="text-muted-foreground">#{i}</span> ·{" "}
+                          <span className="text-foreground">
+                            {state.rows[i]?.[state.targetEmailHeader] ?? "—"}
+                          </span>
+                          {isProcessed && (
+                            <span className="ml-2 rounded border border-sky-glow/40 bg-sky-glow/10 px-1 py-0.5 text-[10px] text-sky-glow">
+                              done
+                            </span>
+                          )}
+                        </span>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          className="h-6 px-2 text-sky-glow hover:bg-sky-glow/10"
+                          onClick={() => {
+                            setActiveOverride(i);
+                            setJumpInput(String(i));
+                            setQueueSearch("");
+                            toast.success(`Loaded row #${i}`);
+                          }}
+                        >
+                          Load
+                        </Button>
+                      </li>
+                    );
+                  })}
+                </ul>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
       <div className="overflow-hidden rounded-lg border border-border-strong/60 bg-bg-app p-4">
         {state.rows.length === 0 ? (
           <div className="grid place-items-center px-6 py-10 text-center">
@@ -1031,15 +1133,16 @@ function NextRowPreview({
   onSkip: () => void;
   isResend?: boolean;
 }) {
-  const toAddr = cleanEmails(row?.[targetEmailHeader] ?? "");
+  const rawRecipients = row?.[targetEmailHeader] ?? "";
+  const { to: toAddr, bcc: bccAddr } = splitToBcc(rawRecipients);
   const subject = renderTemplate(subjectTpl, row);
   const body = renderTemplate(bodyTpl, row);
   const renderedHtml = autoFormatHtml(renderTemplate(htmlTpl, row));
   const plainHref = toAddr
-    ? `mailto:${toAddr}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`
+    ? buildMailto(rawRecipients, { subject, body })
     : "";
   const htmlHref = toAddr
-    ? `mailto:${toAddr}?subject=${encodeURIComponent(subject)}`
+    ? buildMailto(rawRecipients, { subject })
     : "";
   const sendHtml = async () => {
     if (!toAddr) return;
@@ -1079,6 +1182,12 @@ function NextRowPreview({
           <span className="text-muted-foreground">To: </span>
           <span className="text-foreground">{toAddr || <span className="text-destructive">— missing —</span>}</span>
         </div>
+        {bccAddr && (
+          <div className="font-mono-data text-[11px]">
+            <span className="text-muted-foreground">Bcc: </span>
+            <span className="text-foreground">{bccAddr}</span>
+          </div>
+        )}
         <div className="font-mono-data text-[11px]">
           <span className="text-muted-foreground">Subject: </span>
           <span className="text-amber-glow">{subject || "—"}</span>
