@@ -88,7 +88,7 @@ function renderTemplate(tpl: string, row: Row | undefined): string {
  */
 function cleanEmails(raw: string): string {
   return (raw || "")
-    .split(/[,;]+/)
+    .split(/[,;:\s|]+/)
     .map((e) => e.trim())
     .filter(Boolean)
     .join(",");
@@ -101,7 +101,7 @@ function cleanEmails(raw: string): string {
  */
 function splitToBcc(raw: string): { to: string; bcc: string } {
   const list = (raw || "")
-    .split(/[,;]+/)
+    .split(/[,;:\s|]+/)
     .map((e) => e.trim())
     .filter(Boolean);
   if (list.length === 0) return { to: "", bcc: "" };
