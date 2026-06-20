@@ -123,6 +123,78 @@ function buildMailto(rawRecipients: string, params: Record<string, string>): str
 }
 
 /**
+ * Detect if Web Workers are usable. Lightweight Android WebViews
+ * (e.g. Via Browser) frequently disable workers — calling `new Worker`
+ * throws synchronously. We probe once at parse time.
+ */
+function workersSupported(): boolean {
+  if (typeof Worker === "undefined") return false;
+  try {
+    const url = URL.createObjectURL(new Blob(["self.close()"], { type: "application/javascript" }));
+    const w = new Worker(url);
+    w.terminate();
+    URL.revokeObjectURL(url);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Rich-HTML clipboard copy with multi-tier fallback so lightweight
+ * mobile browsers never silently fail:
+ *   1. async navigator.clipboard.write([ClipboardItem]) — modern path
+ *   2. async navigator.clipboard.writeText(html)        — text-only
+ *   3. document.execCommand('copy') over a hidden contenteditable — legacy
+ */
+async function copyRichHtml(html: string): Promise<boolean> {
+  const plain = html.replace(/<[^>]+>/g, "");
+  try {
+    if (typeof ClipboardItem !== "undefined" && navigator.clipboard?.write) {
+      await navigator.clipboard.write([
+        new ClipboardItem({
+          "text/html": new Blob([html], { type: "text/html" }),
+          "text/plain": new Blob([plain], { type: "text/plain" }),
+        }),
+      ]);
+      return true;
+    }
+  } catch {
+    /* fall through */
+  }
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(html);
+      return true;
+    }
+  } catch {
+    /* fall through */
+  }
+  // Legacy execCommand fallback — works inside lightweight WebViews.
+  try {
+    const holder = document.createElement("div");
+    holder.contentEditable = "true";
+    holder.innerHTML = html;
+    holder.style.position = "fixed";
+    holder.style.left = "-9999px";
+    holder.style.top = "0";
+    holder.style.opacity = "0";
+    document.body.appendChild(holder);
+    const range = document.createRange();
+    range.selectNodeContents(holder);
+    const sel = window.getSelection();
+    sel?.removeAllRanges();
+    sel?.addRange(range);
+    const ok = document.execCommand("copy");
+    sel?.removeAllRanges();
+    document.body.removeChild(holder);
+    return ok;
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Auto-format a raw HTML template so plain newlines in the editor
  * become visible paragraph / line breaks in the rendered output.
  * - Blank-line separated chunks → wrapped in <p>…</p>
