@@ -95,6 +95,34 @@ function cleanEmails(raw: string): string {
 }
 
 /**
+ * Split a multi-email cell into a primary "To:" address and any
+ * remaining addresses to be BCC'd. Returns empty strings when no
+ * recipients are present.
+ */
+function splitToBcc(raw: string): { to: string; bcc: string } {
+  const list = (raw || "")
+    .split(/[,;]+/)
+    .map((e) => e.trim())
+    .filter(Boolean);
+  if (list.length === 0) return { to: "", bcc: "" };
+  return { to: list[0], bcc: list.slice(1).join(",") };
+}
+
+/**
+ * Build a mailto: URL where the first address goes in the To field
+ * and any extra addresses are hidden in BCC.
+ */
+function buildMailto(rawRecipients: string, params: Record<string, string>): string {
+  const { to, bcc } = splitToBcc(rawRecipients);
+  const qs: string[] = [];
+  if (bcc) qs.push(`bcc=${encodeURIComponent(bcc)}`);
+  for (const [k, v] of Object.entries(params)) {
+    if (v !== undefined && v !== "") qs.push(`${k}=${encodeURIComponent(v)}`);
+  }
+  return `mailto:${to}${qs.length ? `?${qs.join("&")}` : ""}`;
+}
+
+/**
  * Auto-format a raw HTML template so plain newlines in the editor
  * become visible paragraph / line breaks in the rendered output.
  * - Blank-line separated chunks → wrapped in <p>…</p>
