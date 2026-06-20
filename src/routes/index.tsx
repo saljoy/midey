@@ -620,6 +620,7 @@ function SectionACard({
   const [filter, setFilter] = useState<"all" | "active" | "processed">("all");
   const htmlTextareaRef = useRef<HTMLTextAreaElement>(null);
   const [processedSearch, setProcessedSearch] = useState("");
+  const [queueSearch, setQueueSearch] = useState("");
   const processedIndices = useMemo(
     () => Object.entries(state.rowStates)
       .filter(([, v]) => v === "processed")
@@ -639,6 +640,21 @@ function SectionACard({
       return Object.values(row).some((v) => String(v ?? "").toLowerCase().includes(q));
     });
   }, [processedSearch, processedIndices, state.rows, state.targetEmailHeader]);
+
+  /* Active queue email search — matches across all rows respecting the
+   * current filter (all / active). Processed mode uses processedSearch. */
+  const queueSearchMatches = useMemo(() => {
+    const q = queueSearch.trim().toLowerCase();
+    if (!q) return [] as number[];
+    const matches: number[] = [];
+    for (let i = 0; i < state.rows.length; i++) {
+      if (filter === "active" && state.rowStates[i] === "processed") continue;
+      const email = String(state.rows[i]?.[state.targetEmailHeader] ?? "").toLowerCase();
+      if (email.includes(q) || String(i).includes(q)) matches.push(i);
+      if (matches.length >= 50) break;
+    }
+    return matches;
+  }, [queueSearch, state.rows, state.rowStates, state.targetEmailHeader, filter]);
 
   // Char counter for active row's mailto string (plain-text mode only)
   const previewRow = state.rows[nextPendingIndex ?? -1];
