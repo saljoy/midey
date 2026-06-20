@@ -123,78 +123,6 @@ function buildMailto(rawRecipients: string, params: Record<string, string>): str
 }
 
 /**
- * Detect if Web Workers are usable. Lightweight Android WebViews
- * (e.g. Via Browser) frequently disable workers — calling `new Worker`
- * throws synchronously. We probe once at parse time.
- */
-function workersSupported(): boolean {
-  if (typeof Worker === "undefined") return false;
-  try {
-    const url = URL.createObjectURL(new Blob(["self.close()"], { type: "application/javascript" }));
-    const w = new Worker(url);
-    w.terminate();
-    URL.revokeObjectURL(url);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-/**
- * Rich-HTML clipboard copy with multi-tier fallback so lightweight
- * mobile browsers never silently fail:
- *   1. async navigator.clipboard.write([ClipboardItem]) — modern path
- *   2. async navigator.clipboard.writeText(html)        — text-only
- *   3. document.execCommand('copy') over a hidden contenteditable — legacy
- */
-async function copyRichHtml(html: string): Promise<boolean> {
-  const plain = html.replace(/<[^>]+>/g, "");
-  try {
-    if (typeof ClipboardItem !== "undefined" && navigator.clipboard?.write) {
-      await navigator.clipboard.write([
-        new ClipboardItem({
-          "text/html": new Blob([html], { type: "text/html" }),
-          "text/plain": new Blob([plain], { type: "text/plain" }),
-        }),
-      ]);
-      return true;
-    }
-  } catch {
-    /* fall through */
-  }
-  try {
-    if (navigator.clipboard?.writeText) {
-      await navigator.clipboard.writeText(html);
-      return true;
-    }
-  } catch {
-    /* fall through */
-  }
-  // Legacy execCommand fallback — works inside lightweight WebViews.
-  try {
-    const holder = document.createElement("div");
-    holder.contentEditable = "true";
-    holder.innerHTML = html;
-    holder.style.position = "fixed";
-    holder.style.left = "-9999px";
-    holder.style.top = "0";
-    holder.style.opacity = "0";
-    document.body.appendChild(holder);
-    const range = document.createRange();
-    range.selectNodeContents(holder);
-    const sel = window.getSelection();
-    sel?.removeAllRanges();
-    sel?.addRange(range);
-    const ok = document.execCommand("copy");
-    sel?.removeAllRanges();
-    document.body.removeChild(holder);
-    return ok;
-  } catch {
-    return false;
-  }
-}
-
-/**
  * Auto-format a raw HTML template so plain newlines in the editor
  * become visible paragraph / line breaks in the rendered output.
  * - Blank-line separated chunks → wrapped in <p>…</p>
@@ -252,43 +180,7 @@ function Index() {
   useEffect(() => {
     if (!hydrated) return;
     const id = setTimeout(() => {
-      try {
-        // Slim persistence: keep templates / settings / row states fully,
-        // but trim each row to only the columns referenced by templates
-        // plus the target email column. Avoids blowing past the ~5MB
-        // localStorage quota on lightweight mobile browsers.
-        const referenced = new Set<string>();
-        if (state.targetEmailHeader) referenced.add(state.targetEmailHeader);
-        const harvest = (tpl: string) => {
-          const re = /\{([^{}]+)\}/g;
-          let m: RegExpExecArray | null;
-          while ((m = re.exec(tpl)) !== null) referenced.add(m[1].trim());
-        };
-        harvest(state.subjectA);
-        harvest(state.bodyA);
-        harvest(state.subjectB);
-        harvest(state.htmlB);
-        for (const slot of state.templateSlotsA) {
-          harvest(slot.subject);
-          harvest(slot.body);
-        }
-        const slimRows: Row[] = state.rows.map((r) => {
-          const out: Row = {};
-          for (const k of referenced) if (r[k] !== undefined) out[k] = r[k];
-          return out;
-        });
-        const slim = { ...state, rows: slimRows };
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(slim));
-      } catch {
-        // Quota errors on tiny WebViews — drop rows entirely, keep settings.
-        try {
-          const { rows: _omit, ...settings } = state;
-          void _omit;
-          localStorage.setItem(STORAGE_KEY, JSON.stringify({ ...settings, rows: [] }));
-        } catch {
-          /* give up silently */
-        }
-      }
+      try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); } catch {}
     }, 150);
     return () => clearTimeout(id);
   }, [state, hydrated]);
@@ -317,15 +209,13 @@ function Index() {
     let headers: string[] = [];
     const total = file.size || 1;
 
-    const useWorker = workersSupported();
     Papa.parse<Row>(file, {
       header: true,
       skipEmptyLines: true,
-      // Use a Web Worker when the runtime supports it; lightweight
-      // mobile browsers (Via, some Android WebViews) block workers,
-      // so we fall back to synchronous main-thread streaming instead
-      // of stalling on "Parsing data payload".
-      worker: useWorker,
+      // NOTE: worker:true + chunk callback is unreliable in some browsers
+      // (cursor never updates → progress stuck at 0%, complete never fires).
+      // Stream on the main thread in 1MB chunks; React state updates
+      // between chunks keep the UI responsive even for 50MB+ files.
       chunkSize: 1024 * 1024,
       chunk: (results, parser) => {
         if (!headers.length && results.meta.fields) {
@@ -444,9 +334,21 @@ function Index() {
   const executeHtml = useCallback(async () => {
     const recipients = cleanEmails(state.recipientB);
     if (!recipients) { toast.error("Recipient required"); return; }
-    const ok = await copyRichHtml(renderedHtml);
-    if (!ok) { toast.error("Clipboard blocked by browser."); return; }
-    toast.success("Rich HTML copied — opening mail in 300ms…");
+    try {
+      const blobHtml = new Blob([renderedHtml], { type: "text/html" });
+      const blobText = new Blob([renderedHtml.replace(/<[^>]+>/g, "")], { type: "text/plain" });
+      if ("ClipboardItem" in window && navigator.clipboard?.write) {
+        await navigator.clipboard.write([
+          new ClipboardItem({ "text/html": blobHtml, "text/plain": blobText }),
+        ]);
+      } else {
+        await navigator.clipboard.writeText(renderedHtml);
+      }
+      toast.success("Rich HTML copied — opening mail in 300ms…");
+    } catch (e) {
+      toast.error(`Clipboard failed: ${(e as Error).message}`);
+      return;
+    }
     setTimeout(() => {
       window.location.href = buildMailto(state.recipientB, { subject: renderedSubjectB });
     }, 300);
@@ -1244,9 +1146,21 @@ function NextRowPreview({
     : "";
   const sendHtml = async () => {
     if (!toAddr) return;
-    const ok = await copyRichHtml(renderedHtml);
-    if (!ok) { toast.error("Clipboard blocked by browser."); return; }
-    toast.success("Rich HTML copied — opening mail in 300ms…");
+    try {
+      const blobHtml = new Blob([renderedHtml], { type: "text/html" });
+      const blobText = new Blob([renderedHtml.replace(/<[^>]+>/g, "")], { type: "text/plain" });
+      if ("ClipboardItem" in window && navigator.clipboard?.write) {
+        await navigator.clipboard.write([
+          new ClipboardItem({ "text/html": blobHtml, "text/plain": blobText }),
+        ]);
+      } else {
+        await navigator.clipboard.writeText(renderedHtml);
+      }
+      toast.success("Rich HTML copied — opening mail in 300ms…");
+    } catch (e) {
+      toast.error(`Clipboard failed: ${(e as Error).message}`);
+      return;
+    }
     onSend();
     setTimeout(() => { window.location.href = htmlHref; }, 300);
   };
