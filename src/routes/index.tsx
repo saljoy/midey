@@ -1057,15 +1057,16 @@ function NextRowPreview({
   onSkip: () => void;
   isResend?: boolean;
 }) {
-  const toAddr = cleanEmails(row?.[targetEmailHeader] ?? "");
+  const rawRecipients = row?.[targetEmailHeader] ?? "";
+  const { to: toAddr, bcc: bccAddr } = splitToBcc(rawRecipients);
   const subject = renderTemplate(subjectTpl, row);
   const body = renderTemplate(bodyTpl, row);
   const renderedHtml = autoFormatHtml(renderTemplate(htmlTpl, row));
   const plainHref = toAddr
-    ? `mailto:${toAddr}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`
+    ? buildMailto(rawRecipients, { subject, body })
     : "";
   const htmlHref = toAddr
-    ? `mailto:${toAddr}?subject=${encodeURIComponent(subject)}`
+    ? buildMailto(rawRecipients, { subject })
     : "";
   const sendHtml = async () => {
     if (!toAddr) return;
