@@ -970,6 +970,66 @@ function SectionACard({
         </div>
       </div>
 
+      {/* Active queue email search */}
+      {filter !== "processed" && state.rows.length > 0 && (
+        <div className="space-y-2">
+          <Input
+            value={queueSearch}
+            onChange={(e) => setQueueSearch(e.target.value)}
+            placeholder="Search by Email…"
+            className="h-8 font-mono-data text-xs"
+          />
+          {queueSearch.trim() && (
+            <div className="rounded-md border border-border-strong/60 bg-surface-2 p-2">
+              {queueSearchMatches.length === 0 ? (
+                <p className="py-2 text-center font-mono-data text-[11px] text-muted-foreground">
+                  No matches for "{queueSearch}".
+                </p>
+              ) : (
+                <ul className="max-h-56 space-y-1 overflow-auto">
+                  {queueSearchMatches.map((i) => {
+                    const isProcessed = state.rowStates[i] === "processed";
+                    return (
+                      <li
+                        key={i}
+                        className={`flex items-center justify-between gap-2 rounded border border-border-strong/40 bg-bg-app px-2 py-1 font-mono-data text-[11px] ${
+                          isProcessed ? "opacity-60" : ""
+                        }`}
+                      >
+                        <span className="min-w-0 truncate">
+                          <span className="text-muted-foreground">#{i}</span> ·{" "}
+                          <span className="text-foreground">
+                            {state.rows[i]?.[state.targetEmailHeader] ?? "—"}
+                          </span>
+                          {isProcessed && (
+                            <span className="ml-2 rounded border border-sky-glow/40 bg-sky-glow/10 px-1 py-0.5 text-[10px] text-sky-glow">
+                              done
+                            </span>
+                          )}
+                        </span>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          className="h-6 px-2 text-sky-glow hover:bg-sky-glow/10"
+                          onClick={() => {
+                            setActiveOverride(i);
+                            setJumpInput(String(i));
+                            setQueueSearch("");
+                            toast.success(`Loaded row #${i}`);
+                          }}
+                        >
+                          Load
+                        </Button>
+                      </li>
+                    );
+                  })}
+                </ul>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
       <div className="overflow-hidden rounded-lg border border-border-strong/60 bg-bg-app p-4">
         {state.rows.length === 0 ? (
           <div className="grid place-items-center px-6 py-10 text-center">
