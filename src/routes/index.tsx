@@ -22,9 +22,9 @@ import {
 export const Route = createFileRoute("/")({
   head: () => ({
     meta: [
-      { title: "Midey Enterprises Outreach Lab" },
+      { title: "Wayne Enterprises Outreach Lab" },
       { name: "description", content: "High-performance mobile outreach console: parse 50MB+ CSV lead lists, fire personalized mailto handoffs, and craft rich HTML drafts — all 100% client-side." },
-      { property: "og:title", content: "Midey Enterprises Outreach Lab" },
+      { property: "og:title", content: "Wayne Enterprises Outreach Lab" },
       { property: "og:description", content: "Client-side outreach dashboard for rapid, templated email handoffs from massive CSV lead lists." },
     ],
   }),
@@ -60,11 +60,11 @@ const DEFAULT_STATE: PersistedState = {
   rowStates: {},
   targetEmailHeader: "",
   subjectA: "Quick question, {first_name}",
-  bodyA: "Hi {first_name},\n\nNoticed {company} — wanted to reach out.\n\n— Midey",
+  bodyA: "Hi {first_name},\n\nNoticed {company} — wanted to reach out.\n\n— Wayne",
   recipientB: "",
   sampleIdB: 0,
   subjectB: "A note for {first_name}",
-  htmlB: "<div style=\"font-family:system-ui;line-height:1.55\">\n  <h2 style=\"color:#0ea5e9\">Hi {first_name} 👋</h2>\n  <p>Loved what you're doing at <b>{company}</b>.</p>\n  <p>— Midey Enterprises</p>\n</div>",
+  htmlB: "<div style=\"font-family:system-ui;line-height:1.55\">\n  <h2 style=\"color:#0ea5e9\">Hi {first_name} 👋</h2>\n  <p>Loved what you're doing at <b>{company}</b>.</p>\n  <p>— Wayne Enterprises</p>\n</div>",
   templateSlotsA: [],
   htmlMode: false,
 };
@@ -409,7 +409,7 @@ function Header({
           </div>
           <div className="min-w-0">
             <h1 className="truncate text-sm font-semibold leading-tight sm:text-base">
-              Midey Enterprises <span className="text-sky-glow">Outreach Lab</span>
+              Wayne Enterprises <span className="text-sky-glow">Outreach Lab</span>
             </h1>
             <p className="truncate font-mono-data text-[10px] text-muted-foreground sm:text-xs">
               {processedRows.toLocaleString()} / {totalRows.toLocaleString()} processed

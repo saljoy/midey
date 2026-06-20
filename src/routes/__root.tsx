@@ -50,7 +50,7 @@ function PinGate({ children }: { children: ReactNode }) {
     <div className="flex min-h-screen items-center justify-center bg-background px-4">
       <form onSubmit={submit} className="w-full max-w-xs space-y-4 text-center">
         <div>
-          <h1 className="text-xl font-semibold text-foreground">Midey</h1>
+          <h1 className="text-xl font-semibold text-foreground">Wayne</h1>
           <p className="mt-1 text-sm text-muted-foreground">Enter access PIN to continue</p>
         </div>
         <input
@@ -140,16 +140,16 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
     meta: [
       { charSet: "utf-8" },
       { name: "viewport", content: "width=device-width, initial-scale=1" },
-      { title: "Midey" },
-      { name: "description", content: "Midey Outreach Lab is a mobile-first, client-side e-commerce outreach dashboard for processing large lead lists." },
+      { title: "Wayne" },
+      { name: "description", content: "Wayne Outreach Lab is a mobile-first, client-side e-commerce outreach dashboard for processing large lead lists." },
       { name: "author", content: "Lovable" },
-      { property: "og:title", content: "Midey" },
-      { property: "og:description", content: "Midey Outreach Lab is a mobile-first, client-side e-commerce outreach dashboard for processing large lead lists." },
+      { property: "og:title", content: "Wayne" },
+      { property: "og:description", content: "Wayne Outreach Lab is a mobile-first, client-side e-commerce outreach dashboard for processing large lead lists." },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary" },
       { name: "twitter:site", content: "@Lovable" },
-      { name: "twitter:title", content: "Midey" },
-      { name: "twitter:description", content: "Midey Outreach Lab is a mobile-first, client-side e-commerce outreach dashboard for processing large lead lists." },
+      { name: "twitter:title", content: "Wayne" },
+      { name: "twitter:description", content: "Wayne Outreach Lab is a mobile-first, client-side e-commerce outreach dashboard for processing large lead lists." },
       { property: "og:image", content: "https://pub-bb2e103a32db4e198524a2e9ed8f35b4.r2.dev/f423352b-9a7b-4479-9f7f-e7fc1004b4e9/id-preview-fc527b12--935bf73b-1be3-4b1a-a7e2-3f435b971263.lovable.app-1781711965353.png" },
       { name: "twitter:image", content: "https://pub-bb2e103a32db4e198524a2e9ed8f35b4.r2.dev/f423352b-9a7b-4479-9f7f-e7fc1004b4e9/id-preview-fc527b12--935bf73b-1be3-4b1a-a7e2-3f435b971263.lovable.app-1781711965353.png" },
     ],
