@@ -350,8 +350,7 @@ function Index() {
       return;
     }
     setTimeout(() => {
-      const href = `mailto:${recipients}?subject=${encodeURIComponent(renderedSubjectB)}`;
-      window.location.href = href;
+      window.location.href = buildMailto(state.recipientB, { subject: renderedSubjectB });
     }, 300);
   }, [state.recipientB, renderedHtml, renderedSubjectB]);
 
@@ -365,9 +364,8 @@ function Index() {
     if (!recipients) { toast.error("Recipient required"); return; }
     const subject = renderTemplate(state.subjectA, sampleRow);
     const body = renderTemplate(state.bodyA, sampleRow);
-    const href = `mailto:${recipients}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
     toast.success("Opening test draft…");
-    window.location.href = href;
+    window.location.href = buildMailto(state.recipientB, { subject, body });
   }, [state.recipientB, state.subjectA, state.bodyA, sampleRow]);
 
   /* ---------- UI ---------- */
