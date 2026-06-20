@@ -1131,6 +1131,9 @@ function NextRowPreview({
     : "";
   const sendHtml = async () => {
     if (!toAddr) return;
+    // Snapshot the current row's mailto BEFORE advancing the queue,
+    // so re-render from onSend() can't swap in the next row's link.
+    const hrefSnapshot = htmlHref;
     try {
       const blobHtml = new Blob([renderedHtml], { type: "text/html" });
       const blobText = new Blob([renderedHtml.replace(/<[^>]+>/g, "")], { type: "text/plain" });
@@ -1147,7 +1150,7 @@ function NextRowPreview({
       return;
     }
     onSend();
-    setTimeout(() => { window.location.href = htmlHref; }, 300);
+    setTimeout(() => { window.location.href = hrefSnapshot; }, 300);
   };
   return (
     <div className="space-y-3">
@@ -1192,7 +1195,7 @@ function NextRowPreview({
         </Button>
         {!toAddr ? (
           <Button size="sm" disabled>
-            <Send className="size-3.5" /> Send next
+            <Send className="size-3.5" /> Send current
           </Button>
         ) : htmlMode ? (
           <Button
@@ -1200,17 +1203,21 @@ function NextRowPreview({
             onClick={sendHtml}
             className="glow-amber bg-[var(--amber)] text-black hover:bg-[var(--amber)]/90"
           >
-            <Send className="size-3.5" /> Send next
+            <Send className="size-3.5" /> Send current
           </Button>
         ) : (
           <Button
-            asChild
             size="sm"
             className="glow-amber bg-[var(--amber)] text-black hover:bg-[var(--amber)]/90"
+            onClick={() => {
+              // Trigger navigation with the CURRENT row's href first,
+              // then mark this row processed so the queue advances after.
+              const hrefSnapshot = plainHref;
+              window.location.href = hrefSnapshot;
+              onSend();
+            }}
           >
-            <a href={plainHref} onClick={onSend}>
-              <Send className="size-3.5" /> Send next
-            </a>
+            <Send className="size-3.5" /> Send current
           </Button>
         )}
       </div>
