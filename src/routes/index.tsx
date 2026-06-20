@@ -95,27 +95,12 @@ function cleanEmails(raw: string): string {
 }
 
 /**
- * Split a multi-email cell into a primary "To:" address and any
- * remaining addresses to be BCC'd. Returns empty strings when no
- * recipients are present.
- */
-function splitToBcc(raw: string): { to: string; bcc: string } {
-  const list = (raw || "")
-    .split(/[,;:\s|]+/)
-    .map((e) => e.trim())
-    .filter(Boolean);
-  if (list.length === 0) return { to: "", bcc: "" };
-  return { to: list[0], bcc: list.slice(1).join(",") };
-}
-
-/**
- * Build a mailto: URL where the first address goes in the To field
- * and any extra addresses are hidden in BCC.
+ * Build a mailto: URL where ALL recipients are placed as a single
+ * comma-separated list in the primary "To:" field (no BCC).
  */
 function buildMailto(rawRecipients: string, params: Record<string, string>): string {
-  const { to, bcc } = splitToBcc(rawRecipients);
+  const to = cleanEmails(rawRecipients);
   const qs: string[] = [];
-  if (bcc) qs.push(`bcc=${encodeURIComponent(bcc)}`);
   for (const [k, v] of Object.entries(params)) {
     if (v !== undefined && v !== "") qs.push(`${k}=${encodeURIComponent(v)}`);
   }
@@ -1134,7 +1119,7 @@ function NextRowPreview({
   isResend?: boolean;
 }) {
   const rawRecipients = row?.[targetEmailHeader] ?? "";
-  const { to: toAddr, bcc: bccAddr } = splitToBcc(rawRecipients);
+  const toAddr = cleanEmails(rawRecipients);
   const subject = renderTemplate(subjectTpl, row);
   const body = renderTemplate(bodyTpl, row);
   const renderedHtml = autoFormatHtml(renderTemplate(htmlTpl, row));
@@ -1182,12 +1167,6 @@ function NextRowPreview({
           <span className="text-muted-foreground">To: </span>
           <span className="text-foreground">{toAddr || <span className="text-destructive">— missing —</span>}</span>
         </div>
-        {bccAddr && (
-          <div className="font-mono-data text-[11px]">
-            <span className="text-muted-foreground">Bcc: </span>
-            <span className="text-foreground">{bccAddr}</span>
-          </div>
-        )}
         <div className="font-mono-data text-[11px]">
           <span className="text-muted-foreground">Subject: </span>
           <span className="text-amber-glow">{subject || "—"}</span>
