@@ -444,21 +444,9 @@ function Index() {
   const executeHtml = useCallback(async () => {
     const recipients = cleanEmails(state.recipientB);
     if (!recipients) { toast.error("Recipient required"); return; }
-    try {
-      const blobHtml = new Blob([renderedHtml], { type: "text/html" });
-      const blobText = new Blob([renderedHtml.replace(/<[^>]+>/g, "")], { type: "text/plain" });
-      if ("ClipboardItem" in window && navigator.clipboard?.write) {
-        await navigator.clipboard.write([
-          new ClipboardItem({ "text/html": blobHtml, "text/plain": blobText }),
-        ]);
-      } else {
-        await navigator.clipboard.writeText(renderedHtml);
-      }
-      toast.success("Rich HTML copied — opening mail in 300ms…");
-    } catch (e) {
-      toast.error(`Clipboard failed: ${(e as Error).message}`);
-      return;
-    }
+    const ok = await copyRichHtml(renderedHtml);
+    if (!ok) { toast.error("Clipboard blocked by browser."); return; }
+    toast.success("Rich HTML copied — opening mail in 300ms…");
     setTimeout(() => {
       window.location.href = buildMailto(state.recipientB, { subject: renderedSubjectB });
     }, 300);
