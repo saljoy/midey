@@ -1106,6 +1106,12 @@ function NextRowPreview({
           <span className="text-muted-foreground">To: </span>
           <span className="text-foreground">{toAddr || <span className="text-destructive">— missing —</span>}</span>
         </div>
+        {bccAddr && (
+          <div className="font-mono-data text-[11px]">
+            <span className="text-muted-foreground">Bcc: </span>
+            <span className="text-foreground">{bccAddr}</span>
+          </div>
+        )}
         <div className="font-mono-data text-[11px]">
           <span className="text-muted-foreground">Subject: </span>
           <span className="text-amber-glow">{subject || "—"}</span>
