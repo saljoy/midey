@@ -97,12 +97,19 @@ function cleanEmails(raw: string): string {
 /**
  * Build a mailto: URL where ALL recipients are placed as a single
  * comma-separated list in the primary "To:" field (no BCC).
+ * Subject and Body are independently passed through encodeURIComponent
+ * so spaces, line breaks, and reserved symbols survive the trip into
+ * mobile Gmail. Recipient commas are percent-encoded (%2C) per RFC 6068
+ * to avoid mobile clients truncating the query string.
  */
 function buildMailto(rawRecipients: string, params: Record<string, string>): string {
-  const to = cleanEmails(rawRecipients);
+  const to = cleanEmails(rawRecipients).split(",").filter(Boolean).join("%2C");
   const qs: string[] = [];
   for (const [k, v] of Object.entries(params)) {
-    if (v !== undefined && v !== "") qs.push(`${k}=${encodeURIComponent(v)}`);
+    if (v === undefined || v === null) continue;
+    const encodedKey = encodeURIComponent(k);
+    const encodedVal = encodeURIComponent(String(v));
+    qs.push(`${encodedKey}=${encodedVal}`);
   }
   return `mailto:${to}${qs.length ? `?${qs.join("&")}` : ""}`;
 }
