@@ -1451,38 +1451,40 @@ function NextRowPreview({
         </pre>
         )}
       </div>
-      <div className="flex justify-end gap-2">
-        <Button size="sm" variant="ghost" onClick={onSkip}>
-          <SkipForward className="size-3.5" /> Skip
-        </Button>
-        {!toAddr ? (
-          <Button size="sm" disabled>
-            <Send className="size-3.5" /> Send current
+      <DraggableSendShell>
+        <div className="flex justify-end gap-2">
+          <Button size="sm" variant="ghost" onClick={onSkip}>
+            <SkipForward className="size-3.5" /> Skip
           </Button>
-        ) : htmlMode ? (
-          <Button
-            size="sm"
-            onClick={sendHtml}
-            className="glow-amber bg-[var(--amber)] text-black hover:bg-[var(--amber)]/90"
-          >
-            <Send className="size-3.5" /> Send current
-          </Button>
-        ) : (
-          <Button
-            size="sm"
-            className="glow-amber bg-[var(--amber)] text-black hover:bg-[var(--amber)]/90"
-            onClick={() => {
-              // Trigger navigation with the CURRENT row's href first,
-              // then mark this row processed so the queue advances after.
-              const hrefSnapshot = plainHref;
-              window.location.href = hrefSnapshot;
-              onSend();
-            }}
-          >
-            <Send className="size-3.5" /> Send current
-          </Button>
-        )}
-      </div>
+          {!toAddr ? (
+            <Button size="sm" disabled>
+              <Send className="size-3.5" /> Send current
+            </Button>
+          ) : htmlMode ? (
+            <Button
+              size="sm"
+              onClick={sendHtml}
+              className="glow-amber bg-[var(--amber)] text-black hover:bg-[var(--amber)]/90"
+            >
+              <Send className="size-3.5" /> Send current
+            </Button>
+          ) : (
+            <Button
+              size="sm"
+              className="glow-amber bg-[var(--amber)] text-black hover:bg-[var(--amber)]/90"
+              onClick={() => {
+                // Trigger navigation with the CURRENT row's href first,
+                // then mark this row processed so the queue advances after.
+                const hrefSnapshot = plainHref;
+                window.location.href = hrefSnapshot;
+                onSend();
+              }}
+            >
+              <Send className="size-3.5" /> Send current
+            </Button>
+          )}
+        </div>
+      </DraggableSendShell>
     </div>
   );
 }
