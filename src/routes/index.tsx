@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import Papa from "papaparse";
 import * as XLSX from "xlsx";
 // react-window removed — queue is no longer displayed as a scrolling list.
@@ -162,6 +162,58 @@ function Index() {
   const [theme, setTheme] = useState<"dark" | "light">("dark");
   const [parsing, setParsing] = useState(false);
   const [parseProgress, setParseProgress] = useState(0);
+
+  // ---- Draggable "Send current" button state ----
+  const [dragUnlocked, setDragUnlocked] = useState(false);
+  const [dragPos, setDragPos] = useState<{ x: number; y: number } | null>(() => {
+    if (typeof window === "undefined") return null;
+    try {
+      const raw = localStorage.getItem("midey:sendBtnPos");
+      if (!raw) return null;
+      const p = JSON.parse(raw);
+      if (typeof p?.x === "number" && typeof p?.y === "number") return p;
+    } catch {}
+    return null;
+  });
+  useEffect(() => {
+    if (!hydrated) return;
+    try {
+      if (dragPos) localStorage.setItem("midey:sendBtnPos", JSON.stringify(dragPos));
+      else localStorage.removeItem("midey:sendBtnPos");
+    } catch {}
+  }, [dragPos, hydrated]);
+  const lastTapRef = useRef(0);
+  const tapTimerRef = useRef<number | null>(null);
+  const onHeaderTap = useCallback(() => {
+    const now = Date.now();
+    const elapsed = now - lastTapRef.current;
+    if (elapsed < 350 && lastTapRef.current !== 0) {
+      // double-tap
+      if (tapTimerRef.current) {
+        window.clearTimeout(tapTimerRef.current);
+        tapTimerRef.current = null;
+      }
+      lastTapRef.current = 0;
+      setDragUnlocked(true);
+      toast.info("Send button unlocked — drag it anywhere");
+    } else {
+      lastTapRef.current = now;
+      if (tapTimerRef.current) window.clearTimeout(tapTimerRef.current);
+      tapTimerRef.current = window.setTimeout(() => {
+        tapTimerRef.current = null;
+        lastTapRef.current = 0;
+        // single tap
+        setDragUnlocked((cur) => {
+          if (cur) {
+            toast.success("Send button locked in place");
+            return false;
+          }
+          return cur;
+        });
+      }, 360);
+    }
+  }, []);
+
   useEffect(() => {
     setState(loadState());
     const t = (localStorage.getItem(THEME_KEY) as "dark" | "light" | null) ?? "dark";
@@ -433,9 +485,12 @@ function Index() {
         onClearAll={clearAll}
         totalRows={state.rows.length}
         processedRows={processedCount}
+        onHeaderTap={onHeaderTap}
+        dragUnlocked={dragUnlocked}
       />
 
       <main className="mx-auto max-w-5xl px-3 pb-24 pt-4 sm:px-6">
+        <DragContext.Provider value={{ dragUnlocked, dragPos, setDragPos }}>
         <IngestPanel
           parsing={parsing}
           progress={parseProgress}
@@ -464,7 +519,131 @@ function Index() {
             sampleRow={sampleRow}
           />
         </div>
+        </DragContext.Provider>
       </main>
+    </div>
+  );
+}
+
+/* --------------------- Draggable Send button shell --------------------- */
+
+type DragCtx = {
+  dragUnlocked: boolean;
+  dragPos: { x: number; y: number } | null;
+  setDragPos: (p: { x: number; y: number } | null) => void;
+};
+const DragContext = createContext<DragCtx>({
+  dragUnlocked: false,
+  dragPos: null,
+  setDragPos: () => {},
+});
+
+function DraggableSendShell({ children }: { children: React.ReactNode }) {
+  const { dragUnlocked, dragPos, setDragPos } = useContext(DragContext);
+  const ref = useRef<HTMLDivElement>(null);
+  const dragRef = useRef<{
+    active: boolean;
+    offX: number;
+    offY: number;
+    moved: boolean;
+  }>({ active: false, offX: 0, offY: 0, moved: false });
+
+  const isFloating = dragUnlocked || dragPos !== null;
+
+  const beginDrag = (clientX: number, clientY: number) => {
+    if (!dragUnlocked) return;
+    const el = ref.current;
+    if (!el) return;
+    const r = el.getBoundingClientRect();
+    dragRef.current = {
+      active: true,
+      offX: clientX - r.left,
+      offY: clientY - r.top,
+      moved: false,
+    };
+    // Seed a fixed position if we don't have one yet
+    if (!dragPos) setDragPos({ x: r.left, y: r.top });
+  };
+
+  const moveDrag = (clientX: number, clientY: number) => {
+    const d = dragRef.current;
+    if (!d.active) return;
+    d.moved = true;
+    const el = ref.current;
+    const w = el?.offsetWidth ?? 0;
+    const h = el?.offsetHeight ?? 0;
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+    const x = Math.max(4, Math.min(vw - w - 4, clientX - d.offX));
+    const y = Math.max(4, Math.min(vh - h - 4, clientY - d.offY));
+    setDragPos({ x, y });
+  };
+
+  const endDrag = () => {
+    dragRef.current.active = false;
+  };
+
+  useEffect(() => {
+    if (!dragUnlocked) return;
+    const onMM = (e: MouseEvent) => moveDrag(e.clientX, e.clientY);
+    const onMU = () => endDrag();
+    const onTM = (e: TouchEvent) => {
+      if (!dragRef.current.active) return;
+      const t = e.touches[0];
+      if (!t) return;
+      e.preventDefault();
+      moveDrag(t.clientX, t.clientY);
+    };
+    const onTE = () => endDrag();
+    window.addEventListener("mousemove", onMM);
+    window.addEventListener("mouseup", onMU);
+    window.addEventListener("touchmove", onTM, { passive: false });
+    window.addEventListener("touchend", onTE);
+    window.addEventListener("touchcancel", onTE);
+    return () => {
+      window.removeEventListener("mousemove", onMM);
+      window.removeEventListener("mouseup", onMU);
+      window.removeEventListener("touchmove", onTM);
+      window.removeEventListener("touchend", onTE);
+      window.removeEventListener("touchcancel", onTE);
+    };
+  }, [dragUnlocked]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const style: React.CSSProperties = isFloating && dragPos
+    ? {
+        position: "fixed",
+        left: dragPos.x,
+        top: dragPos.y,
+        zIndex: 60,
+        touchAction: "none",
+      }
+    : { touchAction: "auto" };
+
+  return (
+    <div
+      ref={ref}
+      style={style}
+      onMouseDown={(e) => {
+        if (!dragUnlocked) return;
+        beginDrag(e.clientX, e.clientY);
+      }}
+      onTouchStart={(e) => {
+        if (!dragUnlocked) return;
+        const t = e.touches[0];
+        if (!t) return;
+        beginDrag(t.clientX, t.clientY);
+      }}
+      className={
+        isFloating
+          ? `rounded-md ${
+              dragUnlocked
+                ? "animate-pulse ring-2 ring-[var(--amber)] shadow-[0_0_24px_rgba(245,158,11,0.55)]"
+                : "ring-1 ring-[var(--amber)]/40"
+            } bg-bg-app/90 p-2 backdrop-blur`
+          : ""
+      }
+    >
+      {children}
     </div>
   );
 }
@@ -472,13 +651,15 @@ function Index() {
 /* ----------------------------- Header ----------------------------- */
 
 function Header({
-  theme, onToggleTheme, onClearAll, totalRows, processedRows,
+  theme, onToggleTheme, onClearAll, totalRows, processedRows, onHeaderTap, dragUnlocked,
 }: {
   theme: "dark" | "light";
   onToggleTheme: () => void;
   onClearAll: () => void;
   totalRows: number;
   processedRows: number;
+  onHeaderTap: () => void;
+  dragUnlocked: boolean;
 }) {
   const [open, setOpen] = useState(false);
   return (
@@ -489,8 +670,19 @@ function Header({
             <Mail className="size-4 text-sky-glow" />
           </div>
           <div className="min-w-0">
-            <h1 className="truncate text-sm font-semibold leading-tight sm:text-base">
+            <h1
+              onClick={onHeaderTap}
+              title="Double-tap to unlock the Send button · single tap to lock"
+              className={`cursor-pointer select-none truncate text-sm font-semibold leading-tight sm:text-base ${
+                dragUnlocked ? "text-amber-glow" : ""
+              }`}
+            >
               Wayne Enterprises <span className="text-sky-glow">Outreach Lab</span>
+              {dragUnlocked && (
+                <span className="ml-2 align-middle rounded border border-[var(--amber)]/60 bg-[var(--amber)]/15 px-1.5 py-0.5 font-mono-data text-[9px] uppercase tracking-wider text-[var(--amber)]">
+                  drag unlocked
+                </span>
+              )}
             </h1>
             <p className="truncate font-mono-data text-[10px] text-muted-foreground sm:text-xs">
               {processedRows.toLocaleString()} / {totalRows.toLocaleString()} processed
@@ -1259,38 +1451,40 @@ function NextRowPreview({
         </pre>
         )}
       </div>
-      <div className="flex justify-end gap-2">
-        <Button size="sm" variant="ghost" onClick={onSkip}>
-          <SkipForward className="size-3.5" /> Skip
-        </Button>
-        {!toAddr ? (
-          <Button size="sm" disabled>
-            <Send className="size-3.5" /> Send current
+      <DraggableSendShell>
+        <div className="flex justify-end gap-2">
+          <Button size="sm" variant="ghost" onClick={onSkip}>
+            <SkipForward className="size-3.5" /> Skip
           </Button>
-        ) : htmlMode ? (
-          <Button
-            size="sm"
-            onClick={sendHtml}
-            className="glow-amber bg-[var(--amber)] text-black hover:bg-[var(--amber)]/90"
-          >
-            <Send className="size-3.5" /> Send current
-          </Button>
-        ) : (
-          <Button
-            size="sm"
-            className="glow-amber bg-[var(--amber)] text-black hover:bg-[var(--amber)]/90"
-            onClick={() => {
-              // Trigger navigation with the CURRENT row's href first,
-              // then mark this row processed so the queue advances after.
-              const hrefSnapshot = plainHref;
-              window.location.href = hrefSnapshot;
-              onSend();
-            }}
-          >
-            <Send className="size-3.5" /> Send current
-          </Button>
-        )}
-      </div>
+          {!toAddr ? (
+            <Button size="sm" disabled>
+              <Send className="size-3.5" /> Send current
+            </Button>
+          ) : htmlMode ? (
+            <Button
+              size="sm"
+              onClick={sendHtml}
+              className="glow-amber bg-[var(--amber)] text-black hover:bg-[var(--amber)]/90"
+            >
+              <Send className="size-3.5" /> Send current
+            </Button>
+          ) : (
+            <Button
+              size="sm"
+              className="glow-amber bg-[var(--amber)] text-black hover:bg-[var(--amber)]/90"
+              onClick={() => {
+                // Trigger navigation with the CURRENT row's href first,
+                // then mark this row processed so the queue advances after.
+                const hrefSnapshot = plainHref;
+                window.location.href = hrefSnapshot;
+                onSend();
+              }}
+            >
+              <Send className="size-3.5" /> Send current
+            </Button>
+          )}
+        </div>
+      </DraggableSendShell>
     </div>
   );
 }
