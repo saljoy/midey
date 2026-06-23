@@ -479,6 +479,8 @@ function Header({
   onClearAll: () => void;
   totalRows: number;
   processedRows: number;
+  onHeaderTap: () => void;
+  dragUnlocked: boolean;
 }) {
   const [open, setOpen] = useState(false);
   return (
@@ -489,8 +491,19 @@ function Header({
             <Mail className="size-4 text-sky-glow" />
           </div>
           <div className="min-w-0">
-            <h1 className="truncate text-sm font-semibold leading-tight sm:text-base">
+            <h1
+              onClick={onHeaderTap}
+              title="Double-tap to unlock the Send button · single tap to lock"
+              className={`cursor-pointer select-none truncate text-sm font-semibold leading-tight sm:text-base ${
+                dragUnlocked ? "text-amber-glow" : ""
+              }`}
+            >
               Wayne Enterprises <span className="text-sky-glow">Outreach Lab</span>
+              {dragUnlocked && (
+                <span className="ml-2 align-middle rounded border border-[var(--amber)]/60 bg-[var(--amber)]/15 px-1.5 py-0.5 font-mono-data text-[9px] uppercase tracking-wider text-[var(--amber)]">
+                  drag unlocked
+                </span>
+              )}
             </h1>
             <p className="truncate font-mono-data text-[10px] text-muted-foreground sm:text-xs">
               {processedRows.toLocaleString()} / {totalRows.toLocaleString()} processed
