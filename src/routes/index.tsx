@@ -472,7 +472,7 @@ function Index() {
 /* ----------------------------- Header ----------------------------- */
 
 function Header({
-  theme, onToggleTheme, onClearAll, totalRows, processedRows,
+  theme, onToggleTheme, onClearAll, totalRows, processedRows, onHeaderTap, dragUnlocked,
 }: {
   theme: "dark" | "light";
   onToggleTheme: () => void;
