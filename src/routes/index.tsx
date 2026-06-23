@@ -162,6 +162,58 @@ function Index() {
   const [theme, setTheme] = useState<"dark" | "light">("dark");
   const [parsing, setParsing] = useState(false);
   const [parseProgress, setParseProgress] = useState(0);
+
+  // ---- Draggable "Send current" button state ----
+  const [dragUnlocked, setDragUnlocked] = useState(false);
+  const [dragPos, setDragPos] = useState<{ x: number; y: number } | null>(() => {
+    if (typeof window === "undefined") return null;
+    try {
+      const raw = localStorage.getItem("midey:sendBtnPos");
+      if (!raw) return null;
+      const p = JSON.parse(raw);
+      if (typeof p?.x === "number" && typeof p?.y === "number") return p;
+    } catch {}
+    return null;
+  });
+  useEffect(() => {
+    if (!hydrated) return;
+    try {
+      if (dragPos) localStorage.setItem("midey:sendBtnPos", JSON.stringify(dragPos));
+      else localStorage.removeItem("midey:sendBtnPos");
+    } catch {}
+  }, [dragPos, hydrated]);
+  const lastTapRef = useRef(0);
+  const tapTimerRef = useRef<number | null>(null);
+  const onHeaderTap = useCallback(() => {
+    const now = Date.now();
+    const elapsed = now - lastTapRef.current;
+    if (elapsed < 350 && lastTapRef.current !== 0) {
+      // double-tap
+      if (tapTimerRef.current) {
+        window.clearTimeout(tapTimerRef.current);
+        tapTimerRef.current = null;
+      }
+      lastTapRef.current = 0;
+      setDragUnlocked(true);
+      toast.info("Send button unlocked — drag it anywhere");
+    } else {
+      lastTapRef.current = now;
+      if (tapTimerRef.current) window.clearTimeout(tapTimerRef.current);
+      tapTimerRef.current = window.setTimeout(() => {
+        tapTimerRef.current = null;
+        lastTapRef.current = 0;
+        // single tap
+        setDragUnlocked((cur) => {
+          if (cur) {
+            toast.success("Send button locked in place");
+            return false;
+          }
+          return cur;
+        });
+      }, 360);
+    }
+  }, []);
+
   useEffect(() => {
     setState(loadState());
     const t = (localStorage.getItem(THEME_KEY) as "dark" | "light" | null) ?? "dark";
