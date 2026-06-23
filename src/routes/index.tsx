@@ -1,6 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Papa from "papaparse";
+import * as XLSX from "xlsx";
 // react-window removed — queue is no longer displayed as a scrolling list.
 import { toast } from "sonner";
 import {
