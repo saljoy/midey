@@ -563,7 +563,7 @@ function IngestPanel({
           className="glow-sky"
           disabled={parsing}
         >
-          <Upload /> {parsing ? `Parsing… ${progress}%` : totalRows ? "Replace CSV" : "Upload CSV"}
+          <Upload /> {parsing ? `Parsing… ${progress}%` : totalRows ? "Replace file" : "Upload CSV / XLSX"}
         </Button>
 
         <div className="flex items-center gap-2 font-mono-data text-xs text-muted-foreground">
