@@ -525,6 +525,129 @@ function Index() {
   );
 }
 
+/* --------------------- Draggable Send button shell --------------------- */
+
+type DragCtx = {
+  dragUnlocked: boolean;
+  dragPos: { x: number; y: number } | null;
+  setDragPos: (p: { x: number; y: number } | null) => void;
+};
+const DragContext = createContext<DragCtx>({
+  dragUnlocked: false,
+  dragPos: null,
+  setDragPos: () => {},
+});
+
+function DraggableSendShell({ children }: { children: React.ReactNode }) {
+  const { dragUnlocked, dragPos, setDragPos } = useContext(DragContext);
+  const ref = useRef<HTMLDivElement>(null);
+  const dragRef = useRef<{
+    active: boolean;
+    offX: number;
+    offY: number;
+    moved: boolean;
+  }>({ active: false, offX: 0, offY: 0, moved: false });
+
+  const isFloating = dragUnlocked || dragPos !== null;
+
+  const beginDrag = (clientX: number, clientY: number) => {
+    if (!dragUnlocked) return;
+    const el = ref.current;
+    if (!el) return;
+    const r = el.getBoundingClientRect();
+    dragRef.current = {
+      active: true,
+      offX: clientX - r.left,
+      offY: clientY - r.top,
+      moved: false,
+    };
+    // Seed a fixed position if we don't have one yet
+    if (!dragPos) setDragPos({ x: r.left, y: r.top });
+  };
+
+  const moveDrag = (clientX: number, clientY: number) => {
+    const d = dragRef.current;
+    if (!d.active) return;
+    d.moved = true;
+    const el = ref.current;
+    const w = el?.offsetWidth ?? 0;
+    const h = el?.offsetHeight ?? 0;
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+    const x = Math.max(4, Math.min(vw - w - 4, clientX - d.offX));
+    const y = Math.max(4, Math.min(vh - h - 4, clientY - d.offY));
+    setDragPos({ x, y });
+  };
+
+  const endDrag = () => {
+    dragRef.current.active = false;
+  };
+
+  useEffect(() => {
+    if (!dragUnlocked) return;
+    const onMM = (e: MouseEvent) => moveDrag(e.clientX, e.clientY);
+    const onMU = () => endDrag();
+    const onTM = (e: TouchEvent) => {
+      if (!dragRef.current.active) return;
+      const t = e.touches[0];
+      if (!t) return;
+      e.preventDefault();
+      moveDrag(t.clientX, t.clientY);
+    };
+    const onTE = () => endDrag();
+    window.addEventListener("mousemove", onMM);
+    window.addEventListener("mouseup", onMU);
+    window.addEventListener("touchmove", onTM, { passive: false });
+    window.addEventListener("touchend", onTE);
+    window.addEventListener("touchcancel", onTE);
+    return () => {
+      window.removeEventListener("mousemove", onMM);
+      window.removeEventListener("mouseup", onMU);
+      window.removeEventListener("touchmove", onTM);
+      window.removeEventListener("touchend", onTE);
+      window.removeEventListener("touchcancel", onTE);
+    };
+  }, [dragUnlocked]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const style: React.CSSProperties = isFloating && dragPos
+    ? {
+        position: "fixed",
+        left: dragPos.x,
+        top: dragPos.y,
+        zIndex: 60,
+        touchAction: "none",
+      }
+    : { touchAction: "auto" };
+
+  return (
+    <div
+      ref={ref}
+      style={style}
+      onMouseDown={(e) => {
+        if (!dragUnlocked) return;
+        beginDrag(e.clientX, e.clientY);
+      }}
+      onTouchStart={(e) => {
+        if (!dragUnlocked) return;
+        const t = e.touches[0];
+        if (!t) return;
+        beginDrag(t.clientX, t.clientY);
+      }}
+      className={
+        isFloating
+          ? `rounded-md ${
+              dragUnlocked
+                ? "animate-pulse ring-2 ring-[var(--amber)] shadow-[0_0_24px_rgba(245,158,11,0.55)]"
+                : "ring-1 ring-[var(--amber)]/40"
+            } bg-bg-app/90 p-2 backdrop-blur`
+          : ""
+      }
+    >
+      {children}
+    </div>
+  );
+}
+
 /* ----------------------------- Header ----------------------------- */
 
 function Header({
