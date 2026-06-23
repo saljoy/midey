@@ -198,6 +198,68 @@ function Index() {
     setParseProgress(0);
     toast.info(`Parsing ${(file.size / 1024 / 1024).toFixed(1)} MB …`);
 
+    const isXlsx = /\.xlsx$/i.test(file.name);
+    if (isXlsx) {
+      const reader = new FileReader();
+      reader.onerror = () => {
+        setParsing(false);
+        toast.error("Failed to read Excel file");
+      };
+      reader.onload = (e) => {
+        try {
+          const data = new Uint8Array(e.target?.result as ArrayBuffer);
+          const wb = XLSX.read(data, { type: "array" });
+          const sheetName = wb.SheetNames[0];
+          if (!sheetName) throw new Error("Workbook has no sheets");
+          const sheet = wb.Sheets[sheetName];
+          const aoa = XLSX.utils.sheet_to_json<unknown[]>(sheet, {
+            header: 1,
+            blankrows: false,
+            defval: "",
+            raw: false,
+          });
+          if (!aoa.length) throw new Error("Sheet is empty");
+          const seen = new Set<string>();
+          const rawHeaders = (aoa[0] as unknown[]).map((h) => String(h ?? "").trim());
+          const headers = rawHeaders.filter((h) => {
+            if (!h) return false;
+            if (h.length > 64) return false;
+            if (/[,\n\r"]/.test(h)) return false;
+            if (seen.has(h)) return false;
+            seen.add(h);
+            return true;
+          });
+          const rows: Row[] = [];
+          for (let i = 1; i < aoa.length && rows.length < 500_000; i++) {
+            const row = aoa[i] as unknown[];
+            const obj: Row = {};
+            for (let c = 0; c < rawHeaders.length; c++) {
+              const key = rawHeaders[c];
+              if (!key || !headers.includes(key)) continue;
+              obj[key] = String(row?.[c] ?? "");
+            }
+            rows.push(obj);
+          }
+          setParsing(false);
+          setParseProgress(100);
+          const guessEmail = headers.find((h) => /e?mail/i.test(h)) ?? headers[0] ?? "";
+          setState((s) => ({
+            ...s,
+            headers,
+            rows,
+            rowStates: {},
+            targetEmailHeader: s.targetEmailHeader || guessEmail,
+          }));
+          toast.success(`Loaded ${rows.length.toLocaleString()} rows · ${headers.length} columns`);
+        } catch (err) {
+          setParsing(false);
+          toast.error(`Parse failed: ${(err as Error).message}`);
+        }
+      };
+      reader.readAsArrayBuffer(file);
+      return;
+    }
+
     const collected: Row[] = [];
     let headers: string[] = [];
     const total = file.size || 1;
