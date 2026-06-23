@@ -485,9 +485,12 @@ function Index() {
         onClearAll={clearAll}
         totalRows={state.rows.length}
         processedRows={processedCount}
+        onHeaderTap={onHeaderTap}
+        dragUnlocked={dragUnlocked}
       />
 
       <main className="mx-auto max-w-5xl px-3 pb-24 pt-4 sm:px-6">
+        <DragContext.Provider value={{ dragUnlocked, dragPos, setDragPos }}>
         <IngestPanel
           parsing={parsing}
           progress={parseProgress}
@@ -516,6 +519,7 @@ function Index() {
             sampleRow={sampleRow}
           />
         </div>
+        </DragContext.Provider>
       </main>
     </div>
   );
