@@ -1076,6 +1076,7 @@ function SectionACard({
   state, patch, queue, processedCount, fireRow, skipRow,
   executeTestHtml, renderedTestHtml, renderedTestSubject, sampleRow,
   executeTestPlain, renderedTestSubjectPlain,
+  activeTemplate, updateTemplate, rotation, resumeTarget, onConsumeResume,
 }: {
   state: PersistedState;
   patch: (p: Partial<PersistedState>) => void;
@@ -1090,6 +1091,11 @@ function SectionACard({
   executeTestPlain: () => void;
   renderedTestSubjectPlain: string;
   sampleRow: Row | undefined;
+  activeTemplate: TemplateItem;
+  updateTemplate: (id: string, p: Partial<TemplateItem>) => void;
+  rotation: { subject: string; body: string; html: string; rotIndex: number; rotName: string };
+  resumeTarget: number | null;
+  onConsumeResume: () => void;
 }) {
   const firstPendingIndex = queue.find(
     (i) => (state.rowStates[i] ?? "pending") === "pending",
@@ -1097,6 +1103,14 @@ function SectionACard({
   // Manual override — "Jump to row" input or "Resend" button on a processed row.
   const [activeOverride, setActiveOverride] = useState<number | null>(null);
   const [jumpInput, setJumpInput] = useState<string>("");
+  // Apply external "Restore previous session" jump
+  useEffect(() => {
+    if (resumeTarget !== null) {
+      setActiveOverride(resumeTarget);
+      setJumpInput(String(resumeTarget));
+      onConsumeResume();
+    }
+  }, [resumeTarget, onConsumeResume]);
   const nextPendingIndex =
     activeOverride !== null && state.rows[activeOverride]
       ? activeOverride
@@ -1144,8 +1158,8 @@ function SectionACard({
   // Char counter for active row's mailto string (plain-text mode only)
   const previewRow = state.rows[nextPendingIndex ?? -1];
   const previewTo = cleanEmails(previewRow?.[state.targetEmailHeader] ?? "");
-  const previewSubject = renderTemplate(state.subjectA, previewRow);
-  const previewBody = renderTemplate(state.bodyA, previewRow);
+  const previewSubject = renderTemplate(rotation.subject, previewRow);
+  const previewBody = renderTemplate(rotation.body, previewRow);
   const mailtoLen = previewRow && !state.htmlMode
     ? `mailto:${previewTo}?subject=${encodeURIComponent(previewSubject)}&body=${encodeURIComponent(previewBody)}`.length
     : 0;
@@ -1191,63 +1205,67 @@ function SectionACard({
         />
       </label>
 
-      {/* Template slot manager */}
-      <div className="flex flex-wrap items-center gap-2 rounded-lg border border-border-strong/60 bg-surface-2 p-2">
-        <span className="font-mono-data text-[10px] uppercase tracking-wider text-muted-foreground">
-          Template slots
-        </span>
-        <Input
-          value={slotName}
-          onChange={(e) => setSlotName(e.target.value)}
-          placeholder="Name (e.g. Klaviyo Hook)"
-          className="h-8 max-w-[180px] font-mono-data text-xs"
-        />
-        <Button size="sm" variant="ghost" onClick={saveSlot} className="h-8">
-          <Save className="size-3.5" /> Save
-        </Button>
-        <div className="relative">
-          <Button
-            size="sm"
-            variant="ghost"
-            className="h-8"
-            onClick={() => setSlotPickerOpen((v) => !v)}
-            disabled={state.templateSlotsA.length === 0}
+      {/* Active Template Dropdown + rotation toggles */}
+      <div className="space-y-2 rounded-lg border border-border-strong/60 bg-surface-2 p-3">
+        <div className="flex flex-wrap items-center gap-2">
+          <Label className="font-mono-data text-[10px] uppercase tracking-wider text-muted-foreground">
+            Active template
+          </Label>
+          <select
+            value={state.activeTemplateId}
+            onChange={(e) => patch({ activeTemplateId: e.target.value })}
+            className="h-8 flex-1 min-w-[160px] rounded-md border border-border-strong/70 bg-bg-app px-2 font-mono-data text-xs outline-none focus:glow-sky"
           >
-            Load ({state.templateSlotsA.length}) ▾
-          </Button>
-          {slotPickerOpen && state.templateSlotsA.length > 0 && (
-            <div className="absolute right-0 z-20 mt-1 w-56 rounded-md border border-border-strong/70 bg-surface-1 p-1 shadow-lg">
-              {state.templateSlotsA.map((s) => (
-                <div key={s.name} className="flex items-center gap-1">
-                  <button
-                    type="button"
-                    onClick={() => loadSlot(s.name)}
-                    className="flex-1 truncate rounded px-2 py-1.5 text-left font-mono-data text-xs hover:bg-surface-2"
-                  >
-                    {s.name}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => deleteSlot(s.name)}
-                    aria-label={`Delete ${s.name}`}
-                    className="rounded px-1.5 py-1 text-muted-foreground hover:text-destructive"
-                  >
-                    <Trash2 className="size-3" />
-                  </button>
-                </div>
-              ))}
-            </div>
-          )}
+            {state.templates.map((t) => (
+              <option key={t.id} value={t.id}>{t.name}</option>
+            ))}
+          </select>
+          <span className="font-mono-data text-[10px] text-muted-foreground">
+            {state.templates.length} total
+          </span>
         </div>
+        <div className="grid gap-2 sm:grid-cols-2">
+          <label className="flex items-center justify-between gap-2 rounded border border-border-strong/40 bg-bg-app px-2 py-1.5">
+            <span className="flex items-center gap-1.5 font-mono-data text-[11px] text-foreground">
+              <Shuffle className="size-3 text-sky-glow" /> Rotate Subjects
+            </span>
+            <input
+              type="checkbox"
+              checked={state.rotateSubjects}
+              onChange={(e) => patch({ rotateSubjects: e.target.checked })}
+              className="size-4 accent-[var(--sky)]"
+            />
+          </label>
+          <label className="flex items-center justify-between gap-2 rounded border border-border-strong/40 bg-bg-app px-2 py-1.5">
+            <span className="flex items-center gap-1.5 font-mono-data text-[11px] text-foreground">
+              <Shuffle className="size-3 text-amber-glow" /> Rotate Body
+            </span>
+            <input
+              type="checkbox"
+              checked={state.rotateBodies}
+              onChange={(e) => patch({ rotateBodies: e.target.checked })}
+              className="size-4 accent-[var(--amber)]"
+            />
+          </label>
+        </div>
+        {(state.rotateSubjects || state.rotateBodies) && state.templates.length > 1 && (
+          <p className="font-mono-data text-[10px] text-muted-foreground">
+            Next send → <span className="text-sky-glow">{rotation.rotName}</span> (slot #{rotation.rotIndex + 1}/{state.templates.length})
+          </p>
+        )}
       </div>
+
+      <SpamHealthCheck
+        subject={activeTemplate.subject}
+        body={state.htmlMode ? activeTemplate.html : activeTemplate.body}
+        html={state.htmlMode ? activeTemplate.html : ""}
+      />
 
       <div className="grid gap-3 sm:grid-cols-2">
         <Field label="Subject template">
           <Input
-            value={state.htmlMode ? state.subjectB : state.subjectA}
-            onChange={(e) =>
-              patch(state.htmlMode ? { subjectB: e.target.value } : { subjectA: e.target.value })
-            }
+            value={activeTemplate.subject}
+            onChange={(e) => updateTemplate(activeTemplate.id, { subject: e.target.value })}
             className="font-mono-data"
             placeholder="Hi {first_name}…"
           />
@@ -1266,13 +1284,13 @@ function SectionACard({
           <Field label="HTML code template">
             <HtmlToolbar
               textareaRef={htmlTextareaRef}
-              value={state.htmlB}
-              onChange={(v) => patch({ htmlB: v })}
+              value={activeTemplate.html}
+              onChange={(v) => updateTemplate(activeTemplate.id, { html: v })}
             />
             <Textarea
               ref={htmlTextareaRef}
-              value={state.htmlB}
-              onChange={(e) => patch({ htmlB: e.target.value })}
+              value={activeTemplate.html}
+              onChange={(e) => updateTemplate(activeTemplate.id, { html: e.target.value })}
               rows={8}
               className="font-mono-data text-[12px] leading-relaxed rounded-t-none border-t-0"
               spellCheck={false}
@@ -1290,7 +1308,7 @@ function SectionACard({
               <iframe
                 title="HTML preview"
                 sandbox=""
-                srcDoc={`<!doctype html><html><body style="margin:0;padding:12px;font-family:system-ui">${autoFormatHtml(renderTemplate(state.htmlB, previewRow ?? sampleRow))}</body></html>`}
+                srcDoc={`<!doctype html><html><body style="margin:0;padding:12px;font-family:system-ui">${autoFormatHtml(renderTemplate(activeTemplate.html, previewRow ?? sampleRow))}</body></html>`}
                 className="block h-[300px] w-full"
               />
             </div>
@@ -1335,8 +1353,8 @@ function SectionACard({
         <>
           <Field label="Plain-text body template">
             <Textarea
-              value={state.bodyA}
-              onChange={(e) => patch({ bodyA: e.target.value })}
+              value={activeTemplate.body}
+              onChange={(e) => updateTemplate(activeTemplate.id, { body: e.target.value })}
               rows={6}
               className="font-mono-data text-[13px]"
               placeholder="Hi {first_name}, …"
@@ -1578,10 +1596,10 @@ function SectionACard({
             rowIndex={nextPendingIndex}
             row={state.rows[nextPendingIndex]}
             targetEmailHeader={state.targetEmailHeader}
-            subjectTpl={state.htmlMode ? state.subjectB : state.subjectA}
-            bodyTpl={state.bodyA}
+            subjectTpl={rotation.subject}
+            bodyTpl={rotation.body}
             htmlMode={state.htmlMode}
-            htmlTpl={state.htmlB}
+            htmlTpl={rotation.html}
             onSend={() => {
               fireRow(nextPendingIndex);
               if (activeOverride !== null) {
