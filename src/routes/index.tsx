@@ -11,6 +11,7 @@ import {
   AlignLeft, AlignCenter, AlignRight, AlignJustify, Link2, Minus,
   Palette, Highlighter, CornerDownLeft, RotateCcw,
 } from "lucide-react";
+import { Plus, ChevronDown, ChevronUp, Shuffle, Activity, ShieldAlert, History, Layers } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -37,6 +38,14 @@ export const Route = createFileRoute("/")({
 type Row = Record<string, string>;
 type RowState = "pending" | "processed" | "skipped";
 
+export interface TemplateItem {
+  id: string;
+  name: string;
+  subject: string;
+  body: string;
+  html: string;
+}
+
 interface PersistedState {
   headers: string[];
   rows: Row[];
@@ -50,6 +59,13 @@ interface PersistedState {
   htmlB: string;
   templateSlotsA: { name: string; subject: string; body: string }[];
   htmlMode: boolean;
+  templates: TemplateItem[];
+  activeTemplateId: string;
+  rotateSubjects: boolean;
+  rotateBodies: boolean;
+  sendCounter: number;
+  dailyGoal: number;
+  queueSearchPersisted: string;
 }
 
 const STORAGE_KEY = "midey.outreach.v1";
@@ -68,7 +84,63 @@ const DEFAULT_STATE: PersistedState = {
   htmlB: "<div style=\"font-family:system-ui;line-height:1.55\">\n  <h2 style=\"color:#0ea5e9\">Hi {first_name} 👋</h2>\n  <p>Loved what you're doing at <b>{company}</b>.</p>\n  <p>— Wayne Enterprises</p>\n</div>",
   templateSlotsA: [],
   htmlMode: false,
+  templates: [],
+  activeTemplateId: "",
+  rotateSubjects: false,
+  rotateBodies: false,
+  sendCounter: 0,
+  dailyGoal: 100,
+  queueSearchPersisted: "",
 };
+
+const AUTOSAVE_KEY = "midey.outreach.autosave.v1";
+const SESSION_META_KEY = "midey.outreach.session.v1";
+
+function newId() {
+  return `tpl_${Math.random().toString(36).slice(2, 9)}`;
+}
+
+/** Spam keywords / patterns commonly tripping aggressive filters. */
+const SPAM_TERMS = [
+  "free", "guarantee", "guaranteed", "urgent", "act now", "risk-free", "risk free",
+  "winner", "cash", "click here", "buy now", "100%", "limited time", "no cost",
+  "no obligation", "offer expires", "earn money", "double your", "make money",
+  "amazing", "congratulations", "miracle", "lowest price", "best price",
+];
+function scanSpam(text: string): { hits: string[]; exclaim: number; allCaps: number } {
+  const t = (text || "").toLowerCase();
+  const hits: string[] = [];
+  for (const term of SPAM_TERMS) {
+    if (t.includes(term)) hits.push(term);
+  }
+  const exclaim = (text.match(/!/g) || []).length;
+  const words = text.split(/\s+/).filter((w) => w.length >= 4);
+  const allCaps = words.filter((w) => /^[A-Z]{4,}$/.test(w)).length;
+  return { hits, exclaim, allCaps };
+}
+/** Validate hyperlinks inside an HTML template. */
+function scanLinks(html: string): { ok: number; broken: { tag: string; reason: string }[] } {
+  const out: { tag: string; reason: string }[] = [];
+  let ok = 0;
+  const re = /<a\b[^>]*>/gi;
+  const matches = html.match(re) || [];
+  for (const tag of matches) {
+    const href = /href\s*=\s*("([^"]*)"|'([^']*)')/i.exec(tag);
+    const url = href?.[2] ?? href?.[3] ?? "";
+    if (!href) { out.push({ tag, reason: "missing href" }); continue; }
+    if (!url) { out.push({ tag, reason: "empty href" }); continue; }
+    if (/\s/.test(url)) { out.push({ tag, reason: "whitespace in url" }); continue; }
+    if (!/^(https?:|mailto:|tel:|#|\/|\{)/i.test(url)) {
+      out.push({ tag, reason: "no protocol" }); continue;
+    }
+    ok++;
+  }
+  // Unbalanced anchor tags
+  const opens = (html.match(/<a\b/gi) || []).length;
+  const closes = (html.match(/<\/a>/gi) || []).length;
+  if (opens !== closes) out.push({ tag: `${opens} open vs ${closes} close`, reason: "unbalanced <a> tags" });
+  return { ok, broken: out };
+}
 
 /* --------------------------- Utilities --------------------------- */
 
@@ -148,7 +220,24 @@ function loadState(): PersistedState {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return DEFAULT_STATE;
-    return { ...DEFAULT_STATE, ...(JSON.parse(raw) as PersistedState) };
+    const parsed = JSON.parse(raw) as Partial<PersistedState>;
+    const merged: PersistedState = { ...DEFAULT_STATE, ...parsed } as PersistedState;
+    // Migration: ensure at least one template exists, seeded from legacy fields
+    if (!merged.templates || merged.templates.length === 0) {
+      const seedId = newId();
+      merged.templates = [{
+        id: seedId,
+        name: "Default",
+        subject: merged.subjectA || DEFAULT_STATE.subjectA,
+        body: merged.bodyA || DEFAULT_STATE.bodyA,
+        html: merged.htmlB || DEFAULT_STATE.htmlB,
+      }];
+      merged.activeTemplateId = seedId;
+    }
+    if (!merged.activeTemplateId || !merged.templates.find((t) => t.id === merged.activeTemplateId)) {
+      merged.activeTemplateId = merged.templates[0].id;
+    }
+    return merged;
   } catch {
     return DEFAULT_STATE;
   }
