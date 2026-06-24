@@ -1165,30 +1165,6 @@ function SectionACard({
     : 0;
   const overLimit = mailtoLen > 2000;
 
-  // Template slot manager
-  const [slotName, setSlotName] = useState("");
-  const [slotPickerOpen, setSlotPickerOpen] = useState(false);
-  const saveSlot = () => {
-    const name = slotName.trim();
-    if (!name) { toast.error("Slot name required"); return; }
-    const next = state.templateSlotsA.filter((s) => s.name !== name);
-    next.push({ name, subject: state.subjectA, body: state.bodyA });
-    patch({ templateSlotsA: next });
-    setSlotName("");
-    toast.success(`Saved slot "${name}"`);
-  };
-  const loadSlot = (name: string) => {
-    const slot = state.templateSlotsA.find((s) => s.name === name);
-    if (!slot) return;
-    patch({ subjectA: slot.subject, bodyA: slot.body });
-    setSlotPickerOpen(false);
-    toast.success(`Loaded "${name}"`);
-  };
-  const deleteSlot = (name: string) => {
-    patch({ templateSlotsA: state.templateSlotsA.filter((s) => s.name !== name) });
-    toast.success(`Deleted "${name}"`);
-  };
-
   return (
     <div className="space-y-4 rounded-xl border border-border-strong/70 bg-surface-1 p-4">
       {/* HTML mode toggle */}
