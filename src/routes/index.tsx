@@ -704,7 +704,7 @@ function Index() {
           processedCount={processedCount}
           totalRows={state.rows.length}
           dailyGoal={state.dailyGoal}
-          onDailyGoal={(n) => patch({ dailyGoal: n })}
+          onDailyGoal={(n: number) => patch({ dailyGoal: n })}
           velocity30={velocity30}
           sessionSeconds={sessionSeconds}
         />
@@ -719,7 +719,7 @@ function Index() {
         <TemplateControlPanel
           templates={state.templates}
           activeTemplateId={state.activeTemplateId}
-          onSelect={(id) => patch({ activeTemplateId: id })}
+          onSelect={(id: string) => patch({ activeTemplateId: id })}
           onUpdate={updateTemplate}
           onAdd={addTemplate}
           onDelete={deleteTemplate}
