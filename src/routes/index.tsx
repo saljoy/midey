@@ -1864,3 +1864,306 @@ function HtmlToolbar({
     </div>
   );
 }
+
+/* ===================== Session Stats Strip ===================== */
+
+function fmtDuration(sec: number) {
+  const h = Math.floor(sec / 3600);
+  const m = Math.floor((sec % 3600) / 60);
+  const s = sec % 60;
+  if (h > 0) return `${h}h ${m}m ${s}s`;
+  if (m > 0) return `${m}m ${s}s`;
+  return `${s}s`;
+}
+
+function SessionStats({
+  processedCount, totalRows, dailyGoal, onDailyGoal, velocity30, sessionSeconds,
+}: {
+  processedCount: number;
+  totalRows: number;
+  dailyGoal: number;
+  onDailyGoal: (n: number) => void;
+  velocity30: number;
+  sessionSeconds: number;
+}) {
+  const [open, setOpen] = useState(true);
+  const goal = Math.max(1, dailyGoal || 1);
+  const pct = Math.min(100, Math.round((processedCount / goal) * 100));
+  return (
+    <section className="mb-3 rounded-xl border border-border-strong/70 bg-surface-1 p-3">
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        className="flex w-full items-center justify-between gap-2"
+      >
+        <span className="flex items-center gap-2 font-mono-data text-[11px] uppercase tracking-wider text-muted-foreground">
+          <Activity className="size-3.5 text-sky-glow" /> Session stats
+        </span>
+        <span className="flex items-center gap-3 font-mono-data text-[11px] text-muted-foreground">
+          <span><span className="text-foreground">{processedCount}</span> / {goal}</span>
+          <span>{velocity30}/30m</span>
+          <span>{fmtDuration(sessionSeconds)}</span>
+          {open ? <ChevronUp className="size-3.5" /> : <ChevronDown className="size-3.5" />}
+        </span>
+      </button>
+      {open && (
+        <div className="mt-3 space-y-3">
+          <div>
+            <div className="mb-1 flex items-center justify-between font-mono-data text-[10px] uppercase tracking-wider text-muted-foreground">
+              <span>Daily progress</span>
+              <span>{pct}%</span>
+            </div>
+            <div className="h-2 w-full overflow-hidden rounded-full bg-surface-2">
+              <div
+                className="h-full bg-[var(--sky)] transition-[width] duration-300"
+                style={{ width: `${pct}%` }}
+              />
+            </div>
+          </div>
+          <div className="grid gap-2 sm:grid-cols-3">
+            <div className="rounded border border-border-strong/40 bg-surface-2 p-2">
+              <div className="font-mono-data text-[10px] uppercase text-muted-foreground">Targets</div>
+              <div className="font-mono-data text-sm text-foreground">
+                {processedCount.toLocaleString()} / {goal.toLocaleString()}
+              </div>
+              <Input
+                type="number"
+                min={1}
+                value={dailyGoal}
+                onChange={(e) => onDailyGoal(Math.max(1, Number(e.target.value) || 1))}
+                className="mt-1 h-7 font-mono-data text-xs"
+              />
+            </div>
+            <div className="rounded border border-border-strong/40 bg-surface-2 p-2">
+              <div className="font-mono-data text-[10px] uppercase text-muted-foreground">Velocity (30m)</div>
+              <div className="font-mono-data text-sm text-amber-glow">{velocity30} sent</div>
+              <div className="font-mono-data text-[10px] text-muted-foreground">
+                {totalRows ? `${totalRows.toLocaleString()} rows loaded` : "no file"}
+              </div>
+            </div>
+            <div className="rounded border border-border-strong/40 bg-surface-2 p-2">
+              <div className="font-mono-data text-[10px] uppercase text-muted-foreground">Session timer</div>
+              <div className="font-mono-data text-sm text-sky-glow">{fmtDuration(sessionSeconds)}</div>
+              <div className="font-mono-data text-[10px] text-muted-foreground">since page load</div>
+            </div>
+          </div>
+        </div>
+      )}
+    </section>
+  );
+}
+
+/* ===================== Resume banner ===================== */
+
+function ResumeBanner({
+  lastRow, ts, onRestore, onDismiss,
+}: { lastRow: number; ts: number; onRestore: () => void; onDismiss: () => void }) {
+  const ago = ts ? Math.max(0, Math.floor((Date.now() - ts) / 60000)) : 0;
+  return (
+    <div className="mb-3 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-sky-glow/40 bg-sky-glow/5 px-3 py-2">
+      <div className="flex items-center gap-2 font-mono-data text-xs text-foreground">
+        <History className="size-3.5 text-sky-glow" />
+        Resume your previous session at Row <span className="text-sky-glow">#{lastRow}</span>?
+        {ago > 0 && <span className="text-muted-foreground">· {ago}m ago</span>}
+      </div>
+      <div className="flex gap-2">
+        <Button size="sm" variant="ghost" onClick={onDismiss}>Dismiss</Button>
+        <Button size="sm" onClick={onRestore} className="glow-sky bg-[var(--sky)] text-black hover:bg-[var(--sky)]/90">
+          Restore
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+/* ===================== Template Control Panel ===================== */
+
+function TemplateControlPanel({
+  templates, activeTemplateId, onSelect, onUpdate, onAdd, onDelete,
+}: {
+  templates: TemplateItem[];
+  activeTemplateId: string;
+  onSelect: (id: string) => void;
+  onUpdate: (id: string, p: Partial<TemplateItem>) => void;
+  onAdd: () => void;
+  onDelete: (id: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  return (
+    <section className="mb-3 rounded-xl border border-border-strong/70 bg-surface-1">
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        className="flex w-full items-center justify-between gap-2 p-3"
+      >
+        <span className="flex items-center gap-2 font-mono-data text-[11px] uppercase tracking-wider text-muted-foreground">
+          <Layers className="size-3.5 text-amber-glow" /> Template Control Panel
+        </span>
+        <span className="flex items-center gap-2 font-mono-data text-[11px] text-muted-foreground">
+          {templates.length} template{templates.length === 1 ? "" : "s"}
+          {open ? <ChevronUp className="size-3.5" /> : <ChevronDown className="size-3.5" />}
+        </span>
+      </button>
+      {open && (
+        <div className="space-y-3 border-t border-border-strong/40 p-3">
+          <div className="flex items-center justify-between gap-2">
+            <p className="font-mono-data text-[10px] text-muted-foreground">
+              Edit every template's Subject &amp; Body. The dropdown below feeds the live preview.
+            </p>
+            <Button size="sm" onClick={onAdd} className="h-8">
+              <Plus className="size-3.5" /> Add Template
+            </Button>
+          </div>
+          <div className="space-y-3">
+            {templates.map((t, idx) => {
+              const isActive = t.id === activeTemplateId;
+              return (
+                <div
+                  key={t.id}
+                  className={`rounded-lg border p-3 ${
+                    isActive ? "border-sky-glow/60 bg-sky-glow/5" : "border-border-strong/40 bg-surface-2"
+                  }`}
+                >
+                  <div className="mb-2 flex flex-wrap items-center gap-2">
+                    <span className="font-mono-data text-[10px] uppercase text-muted-foreground">#{idx + 1}</span>
+                    <Input
+                      value={t.name}
+                      onChange={(e) => onUpdate(t.id, { name: e.target.value })}
+                      className="h-7 max-w-[200px] font-mono-data text-xs"
+                      placeholder="Template name"
+                    />
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className="h-7"
+                      onClick={() => onSelect(t.id)}
+                      disabled={isActive}
+                    >
+                      {isActive ? "Active" : "Activate"}
+                    </Button>
+                    <div className="ml-auto">
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        className="h-7 text-destructive hover:bg-destructive/10"
+                        onClick={() => onDelete(t.id)}
+                        aria-label={`Delete ${t.name}`}
+                      >
+                        <Trash2 className="size-3.5" />
+                      </Button>
+                    </div>
+                  </div>
+                  <div className="grid gap-2">
+                    <Input
+                      value={t.subject}
+                      onChange={(e) => onUpdate(t.id, { subject: e.target.value })}
+                      placeholder="Subject"
+                      className="h-8 font-mono-data text-xs"
+                    />
+                    <Textarea
+                      value={t.body}
+                      onChange={(e) => onUpdate(t.id, { body: e.target.value })}
+                      placeholder="Plain-text body"
+                      rows={3}
+                      className="font-mono-data text-[12px]"
+                    />
+                    <Textarea
+                      value={t.html}
+                      onChange={(e) => onUpdate(t.id, { html: e.target.value })}
+                      placeholder="HTML body"
+                      rows={3}
+                      className="font-mono-data text-[12px]"
+                      spellCheck={false}
+                    />
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+    </section>
+  );
+}
+
+/* ===================== Spam / Link Health Check ===================== */
+
+function SpamHealthCheck({
+  subject, body, html,
+}: { subject: string; body: string; html: string }) {
+  const subj = useMemo(() => scanSpam(subject), [subject]);
+  const bod = useMemo(() => scanSpam(body), [body]);
+  const links = useMemo(() => (html ? scanLinks(html) : { ok: 0, broken: [] as { tag: string; reason: string }[] }), [html]);
+  const totalHits = subj.hits.length + bod.hits.length;
+  const hot = totalHits > 0 || subj.exclaim > 2 || bod.exclaim > 4 || links.broken.length > 0;
+  return (
+    <div
+      className={`rounded-lg border p-3 ${
+        hot ? "border-amber-glow/60 bg-amber-glow/10" : "border-border-strong/60 bg-surface-2"
+      }`}
+    >
+      <div className="mb-2 flex items-center gap-2 font-mono-data text-[10px] uppercase tracking-wider text-muted-foreground">
+        <ShieldAlert className={`size-3.5 ${hot ? "text-amber-glow" : "text-sky-glow"}`} />
+        Health check
+        <span className={`ml-auto font-mono-data text-[10px] ${hot ? "text-amber-glow" : "text-sky-glow"}`}>
+          {hot ? "review" : "clean"}
+        </span>
+      </div>
+      <div className="grid gap-2 sm:grid-cols-2">
+        <div className="space-y-1">
+          <div className="font-mono-data text-[10px] uppercase text-muted-foreground">Subject</div>
+          {subj.hits.length === 0 && subj.exclaim <= 2 && subj.allCaps === 0 ? (
+            <p className="font-mono-data text-[11px] text-muted-foreground">No spam triggers detected.</p>
+          ) : (
+            <div className="flex flex-wrap gap-1">
+              {subj.hits.map((h) => (
+                <span key={h} className="rounded border border-amber-glow/40 bg-amber-glow/15 px-1.5 py-0.5 font-mono-data text-[10px] text-amber-glow">{h}</span>
+              ))}
+              {subj.exclaim > 2 && (
+                <span className="rounded border border-amber-glow/40 bg-amber-glow/15 px-1.5 py-0.5 font-mono-data text-[10px] text-amber-glow">{subj.exclaim}×!</span>
+              )}
+              {subj.allCaps > 0 && (
+                <span className="rounded border border-amber-glow/40 bg-amber-glow/15 px-1.5 py-0.5 font-mono-data text-[10px] text-amber-glow">{subj.allCaps} CAPS</span>
+              )}
+            </div>
+          )}
+        </div>
+        <div className="space-y-1">
+          <div className="font-mono-data text-[10px] uppercase text-muted-foreground">Body</div>
+          {bod.hits.length === 0 && bod.exclaim <= 4 && bod.allCaps === 0 ? (
+            <p className="font-mono-data text-[11px] text-muted-foreground">No spam triggers detected.</p>
+          ) : (
+            <div className="flex flex-wrap gap-1">
+              {bod.hits.map((h) => (
+                <span key={h} className="rounded border border-amber-glow/40 bg-amber-glow/15 px-1.5 py-0.5 font-mono-data text-[10px] text-amber-glow">{h}</span>
+              ))}
+              {bod.exclaim > 4 && (
+                <span className="rounded border border-amber-glow/40 bg-amber-glow/15 px-1.5 py-0.5 font-mono-data text-[10px] text-amber-glow">{bod.exclaim}×!</span>
+              )}
+              {bod.allCaps > 0 && (
+                <span className="rounded border border-amber-glow/40 bg-amber-glow/15 px-1.5 py-0.5 font-mono-data text-[10px] text-amber-glow">{bod.allCaps} CAPS</span>
+              )}
+            </div>
+          )}
+        </div>
+      </div>
+      {html && (
+        <div className="mt-2 space-y-1">
+          <div className="font-mono-data text-[10px] uppercase text-muted-foreground">
+            Links · <span className="text-sky-glow">{links.ok} ok</span>
+            {links.broken.length > 0 && <> · <span className="text-amber-glow">{links.broken.length} broken</span></>}
+          </div>
+          {links.broken.length > 0 && (
+            <ul className="space-y-0.5">
+              {links.broken.slice(0, 4).map((b, i) => (
+                <li key={i} className="font-mono-data text-[10px] text-amber-glow">
+                  ⚠ {b.reason}: <span className="text-muted-foreground">{b.tag.slice(0, 60)}</span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
