@@ -11,6 +11,7 @@ import {
   AlignLeft, AlignCenter, AlignRight, AlignJustify, Link2, Minus,
   Palette, Highlighter, CornerDownLeft, RotateCcw,
 } from "lucide-react";
+import { Plus, ChevronDown, ChevronUp, Shuffle, Activity, ShieldAlert, History, Layers } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -37,6 +38,14 @@ export const Route = createFileRoute("/")({
 type Row = Record<string, string>;
 type RowState = "pending" | "processed" | "skipped";
 
+export interface TemplateItem {
+  id: string;
+  name: string;
+  subject: string;
+  body: string;
+  html: string;
+}
+
 interface PersistedState {
   headers: string[];
   rows: Row[];
@@ -50,6 +59,13 @@ interface PersistedState {
   htmlB: string;
   templateSlotsA: { name: string; subject: string; body: string }[];
   htmlMode: boolean;
+  templates: TemplateItem[];
+  activeTemplateId: string;
+  rotateSubjects: boolean;
+  rotateBodies: boolean;
+  sendCounter: number;
+  dailyGoal: number;
+  queueSearchPersisted: string;
 }
 
 const STORAGE_KEY = "midey.outreach.v1";
@@ -68,7 +84,63 @@ const DEFAULT_STATE: PersistedState = {
   htmlB: "<div style=\"font-family:system-ui;line-height:1.55\">\n  <h2 style=\"color:#0ea5e9\">Hi {first_name} 👋</h2>\n  <p>Loved what you're doing at <b>{company}</b>.</p>\n  <p>— Wayne Enterprises</p>\n</div>",
   templateSlotsA: [],
   htmlMode: false,
+  templates: [],
+  activeTemplateId: "",
+  rotateSubjects: false,
+  rotateBodies: false,
+  sendCounter: 0,
+  dailyGoal: 100,
+  queueSearchPersisted: "",
 };
+
+const AUTOSAVE_KEY = "midey.outreach.autosave.v1";
+const SESSION_META_KEY = "midey.outreach.session.v1";
+
+function newId() {
+  return `tpl_${Math.random().toString(36).slice(2, 9)}`;
+}
+
+/** Spam keywords / patterns commonly tripping aggressive filters. */
+const SPAM_TERMS = [
+  "free", "guarantee", "guaranteed", "urgent", "act now", "risk-free", "risk free",
+  "winner", "cash", "click here", "buy now", "100%", "limited time", "no cost",
+  "no obligation", "offer expires", "earn money", "double your", "make money",
+  "amazing", "congratulations", "miracle", "lowest price", "best price",
+];
+function scanSpam(text: string): { hits: string[]; exclaim: number; allCaps: number } {
+  const t = (text || "").toLowerCase();
+  const hits: string[] = [];
+  for (const term of SPAM_TERMS) {
+    if (t.includes(term)) hits.push(term);
+  }
+  const exclaim = (text.match(/!/g) || []).length;
+  const words = text.split(/\s+/).filter((w) => w.length >= 4);
+  const allCaps = words.filter((w) => /^[A-Z]{4,}$/.test(w)).length;
+  return { hits, exclaim, allCaps };
+}
+/** Validate hyperlinks inside an HTML template. */
+function scanLinks(html: string): { ok: number; broken: { tag: string; reason: string }[] } {
+  const out: { tag: string; reason: string }[] = [];
+  let ok = 0;
+  const re = /<a\b[^>]*>/gi;
+  const matches = html.match(re) || [];
+  for (const tag of matches) {
+    const href = /href\s*=\s*("([^"]*)"|'([^']*)')/i.exec(tag);
+    const url = href?.[2] ?? href?.[3] ?? "";
+    if (!href) { out.push({ tag, reason: "missing href" }); continue; }
+    if (!url) { out.push({ tag, reason: "empty href" }); continue; }
+    if (/\s/.test(url)) { out.push({ tag, reason: "whitespace in url" }); continue; }
+    if (!/^(https?:|mailto:|tel:|#|\/|\{)/i.test(url)) {
+      out.push({ tag, reason: "no protocol" }); continue;
+    }
+    ok++;
+  }
+  // Unbalanced anchor tags
+  const opens = (html.match(/<a\b/gi) || []).length;
+  const closes = (html.match(/<\/a>/gi) || []).length;
+  if (opens !== closes) out.push({ tag: `${opens} open vs ${closes} close`, reason: "unbalanced <a> tags" });
+  return { ok, broken: out };
+}
 
 /* --------------------------- Utilities --------------------------- */
 
@@ -148,7 +220,24 @@ function loadState(): PersistedState {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return DEFAULT_STATE;
-    return { ...DEFAULT_STATE, ...(JSON.parse(raw) as PersistedState) };
+    const parsed = JSON.parse(raw) as Partial<PersistedState>;
+    const merged: PersistedState = { ...DEFAULT_STATE, ...parsed } as PersistedState;
+    // Migration: ensure at least one template exists, seeded from legacy fields
+    if (!merged.templates || merged.templates.length === 0) {
+      const seedId = newId();
+      merged.templates = [{
+        id: seedId,
+        name: "Default",
+        subject: merged.subjectA || DEFAULT_STATE.subjectA,
+        body: merged.bodyA || DEFAULT_STATE.bodyA,
+        html: merged.htmlB || DEFAULT_STATE.htmlB,
+      }];
+      merged.activeTemplateId = seedId;
+    }
+    if (!merged.activeTemplateId || !merged.templates.find((t) => t.id === merged.activeTemplateId)) {
+      merged.activeTemplateId = merged.templates[0].id;
+    }
+    return merged;
   } catch {
     return DEFAULT_STATE;
   }
@@ -241,6 +330,61 @@ function Index() {
   const patch = useCallback((p: Partial<PersistedState>) => {
     setState((s) => ({ ...s, ...p }));
   }, []);
+
+  /* ---------- Templates / rotation helpers ---------- */
+  const activeTemplate: TemplateItem = useMemo(() => {
+    const found = state.templates.find((t) => t.id === state.activeTemplateId);
+    if (found) return found;
+    return state.templates[0] ?? { id: "", name: "Default", subject: state.subjectA, body: state.bodyA, html: state.htmlB };
+  }, [state.templates, state.activeTemplateId, state.subjectA, state.bodyA, state.htmlB]);
+
+  const updateTemplate = useCallback((id: string, partial: Partial<TemplateItem>) => {
+    setState((s) => ({
+      ...s,
+      templates: s.templates.map((t) => (t.id === id ? { ...t, ...partial } : t)),
+    }));
+  }, []);
+  const addTemplate = useCallback(() => {
+    const id = newId();
+    const next: TemplateItem = {
+      id,
+      name: `Template ${state.templates.length + 1}`,
+      subject: activeTemplate.subject,
+      body: activeTemplate.body,
+      html: activeTemplate.html,
+    };
+    setState((s) => ({ ...s, templates: [...s.templates, next], activeTemplateId: id }));
+    toast.success(`Added "${next.name}"`);
+  }, [state.templates.length, activeTemplate]);
+  const deleteTemplate = useCallback((id: string) => {
+    setState((s) => {
+      if (s.templates.length <= 1) {
+        toast.error("Keep at least one template");
+        return s;
+      }
+      const remaining = s.templates.filter((t) => t.id !== id);
+      return {
+        ...s,
+        templates: remaining,
+        activeTemplateId: s.activeTemplateId === id ? remaining[0].id : s.activeTemplateId,
+      };
+    });
+  }, []);
+
+  /** Resolve the (subject, body, html) actually used for the NEXT send,
+   *  honoring rotation toggles. */
+  const rotation = useMemo(() => {
+    const n = state.templates.length || 1;
+    const idx = ((state.sendCounter % n) + n) % n;
+    const rotTpl = state.templates[idx] ?? activeTemplate;
+    return {
+      subject: state.rotateSubjects ? rotTpl.subject : activeTemplate.subject,
+      body: state.rotateBodies ? rotTpl.body : activeTemplate.body,
+      html: state.rotateBodies ? rotTpl.html : activeTemplate.html,
+      rotIndex: idx,
+      rotName: rotTpl.name,
+    };
+  }, [state.templates, state.sendCounter, state.rotateSubjects, state.rotateBodies, activeTemplate]);
 
   /* ---------- CSV Parse (streaming, off main work via Papa worker) ---------- */
 
@@ -404,7 +548,12 @@ function Index() {
       toast.error(`Row ${rowIndex} missing "${state.targetEmailHeader}"`);
       return;
     }
-    setState((s) => ({ ...s, rowStates: { ...s.rowStates, [rowIndex]: "processed" } }));
+    setState((s) => ({
+      ...s,
+      rowStates: { ...s.rowStates, [rowIndex]: "processed" },
+      sendCounter: s.sendCounter + 1,
+    }));
+    sendLogRef.current.push(Date.now());
   }, [state.rows, state.targetEmailHeader, state.subjectA, state.bodyA]);
 
   const skipRow = useCallback((rowIndex: number) => {
@@ -433,10 +582,13 @@ function Index() {
 
   const sampleRow = state.rows[state.sampleIdB];
   const renderedHtml = useMemo(
-    () => autoFormatHtml(renderTemplate(state.htmlB, sampleRow)),
-    [state.htmlB, sampleRow],
+    () => autoFormatHtml(renderTemplate(activeTemplate.html, sampleRow)),
+    [activeTemplate.html, sampleRow],
   );
-  const renderedSubjectB = useMemo(() => renderTemplate(state.subjectB, sampleRow), [state.subjectB, sampleRow]);
+  const renderedSubjectB = useMemo(
+    () => renderTemplate(activeTemplate.subject, sampleRow),
+    [activeTemplate.subject, sampleRow],
+  );
 
   const executeHtml = useCallback(async () => {
     const recipients = cleanEmails(state.recipientB);
@@ -463,17 +615,74 @@ function Index() {
 
   /* Plain-text test sandbox: uses sample row + manual recipient, opens mailto with subject+body. */
   const renderedSubjectAPreview = useMemo(
-    () => renderTemplate(state.subjectA, sampleRow),
-    [state.subjectA, sampleRow],
+    () => renderTemplate(activeTemplate.subject, sampleRow),
+    [activeTemplate.subject, sampleRow],
   );
   const executePlainTest = useCallback(() => {
     const recipients = cleanEmails(state.recipientB);
     if (!recipients) { toast.error("Recipient required"); return; }
-    const subject = renderTemplate(state.subjectA, sampleRow);
-    const body = renderTemplate(state.bodyA, sampleRow);
+    const subject = renderTemplate(activeTemplate.subject, sampleRow);
+    const body = renderTemplate(activeTemplate.body, sampleRow);
     toast.success("Opening test draft…");
     window.location.href = buildMailto(state.recipientB, { subject, body });
-  }, [state.recipientB, state.subjectA, state.bodyA, sampleRow]);
+  }, [state.recipientB, activeTemplate, sampleRow]);
+
+  /* ---------- Session stats / autosave / resume ---------- */
+  const sessionStartRef = useRef<number>(Date.now());
+  const sendLogRef = useRef<number[]>([]);
+  const [, forceTick] = useState(0);
+  useEffect(() => {
+    const id = window.setInterval(() => forceTick((n) => n + 1), 1000);
+    return () => window.clearInterval(id);
+  }, []);
+
+  // 10s autosave heartbeat
+  useEffect(() => {
+    if (!hydrated) return;
+    const id = window.setInterval(() => {
+      try {
+        const firstPending = (() => {
+          for (let i = 0; i < state.rows.length; i++) {
+            if (!state.rowStates[i]) return i;
+          }
+          return state.rows.length;
+        })();
+        localStorage.setItem(AUTOSAVE_KEY, JSON.stringify(state));
+        localStorage.setItem(
+          SESSION_META_KEY,
+          JSON.stringify({ ts: Date.now(), lastRow: firstPending, total: state.rows.length }),
+        );
+      } catch {}
+    }, 10_000);
+    return () => window.clearInterval(id);
+  }, [state, hydrated]);
+
+  const [resume, setResume] = useState<{ lastRow: number; ts: number } | null>(null);
+  useEffect(() => {
+    if (!hydrated) return;
+    try {
+      const raw = localStorage.getItem(SESSION_META_KEY);
+      if (!raw) return;
+      const meta = JSON.parse(raw);
+      if (typeof meta?.lastRow === "number" && meta.lastRow > 0 && state.rows.length > 0) {
+        setResume({ lastRow: meta.lastRow, ts: meta.ts ?? 0 });
+      }
+    } catch {}
+  }, [hydrated]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const [resumeTarget, setResumeTarget] = useState<number | null>(null);
+  const acceptResume = useCallback(() => {
+    if (resume) setResumeTarget(resume.lastRow);
+    setResume(null);
+  }, [resume]);
+
+  // Velocity (last 30 min)
+  const velocity30 = useMemo(() => {
+    const cutoff = Date.now() - 30 * 60_000;
+    sendLogRef.current = sendLogRef.current.filter((t) => t > cutoff - 1);
+    return sendLogRef.current.length;
+  }, [state.sendCounter]); // eslint-disable-line react-hooks/exhaustive-deps
+  const sessionSeconds = Math.floor((Date.now() - sessionStartRef.current) / 1000);
 
   /* ---------- UI ---------- */
 
@@ -491,6 +700,30 @@ function Index() {
 
       <main className="mx-auto max-w-5xl px-3 pb-24 pt-4 sm:px-6">
         <DragContext.Provider value={{ dragUnlocked, dragPos, setDragPos }}>
+        <SessionStats
+          processedCount={processedCount}
+          totalRows={state.rows.length}
+          dailyGoal={state.dailyGoal}
+          onDailyGoal={(n: number) => patch({ dailyGoal: n })}
+          velocity30={velocity30}
+          sessionSeconds={sessionSeconds}
+        />
+        {resume && (
+          <ResumeBanner
+            lastRow={resume.lastRow}
+            ts={resume.ts}
+            onRestore={acceptResume}
+            onDismiss={() => setResume(null)}
+          />
+        )}
+        <TemplateControlPanel
+          templates={state.templates}
+          activeTemplateId={state.activeTemplateId}
+          onSelect={(id: string) => patch({ activeTemplateId: id })}
+          onUpdate={updateTemplate}
+          onAdd={addTemplate}
+          onDelete={deleteTemplate}
+        />
         <IngestPanel
           parsing={parsing}
           progress={parseProgress}
@@ -517,6 +750,11 @@ function Index() {
             executeTestPlain={executePlainTest}
             renderedTestSubjectPlain={renderedSubjectAPreview}
             sampleRow={sampleRow}
+            activeTemplate={activeTemplate}
+            updateTemplate={updateTemplate}
+            rotation={rotation}
+            resumeTarget={resumeTarget}
+            onConsumeResume={() => setResumeTarget(null)}
           />
         </div>
         </DragContext.Provider>
@@ -838,6 +1076,7 @@ function SectionACard({
   state, patch, queue, processedCount, fireRow, skipRow,
   executeTestHtml, renderedTestHtml, renderedTestSubject, sampleRow,
   executeTestPlain, renderedTestSubjectPlain,
+  activeTemplate, updateTemplate, rotation, resumeTarget, onConsumeResume,
 }: {
   state: PersistedState;
   patch: (p: Partial<PersistedState>) => void;
@@ -852,6 +1091,11 @@ function SectionACard({
   executeTestPlain: () => void;
   renderedTestSubjectPlain: string;
   sampleRow: Row | undefined;
+  activeTemplate: TemplateItem;
+  updateTemplate: (id: string, p: Partial<TemplateItem>) => void;
+  rotation: { subject: string; body: string; html: string; rotIndex: number; rotName: string };
+  resumeTarget: number | null;
+  onConsumeResume: () => void;
 }) {
   const firstPendingIndex = queue.find(
     (i) => (state.rowStates[i] ?? "pending") === "pending",
@@ -859,6 +1103,14 @@ function SectionACard({
   // Manual override — "Jump to row" input or "Resend" button on a processed row.
   const [activeOverride, setActiveOverride] = useState<number | null>(null);
   const [jumpInput, setJumpInput] = useState<string>("");
+  // Apply external "Restore previous session" jump
+  useEffect(() => {
+    if (resumeTarget !== null) {
+      setActiveOverride(resumeTarget);
+      setJumpInput(String(resumeTarget));
+      onConsumeResume();
+    }
+  }, [resumeTarget, onConsumeResume]);
   const nextPendingIndex =
     activeOverride !== null && state.rows[activeOverride]
       ? activeOverride
@@ -906,36 +1158,12 @@ function SectionACard({
   // Char counter for active row's mailto string (plain-text mode only)
   const previewRow = state.rows[nextPendingIndex ?? -1];
   const previewTo = cleanEmails(previewRow?.[state.targetEmailHeader] ?? "");
-  const previewSubject = renderTemplate(state.subjectA, previewRow);
-  const previewBody = renderTemplate(state.bodyA, previewRow);
+  const previewSubject = renderTemplate(rotation.subject, previewRow);
+  const previewBody = renderTemplate(rotation.body, previewRow);
   const mailtoLen = previewRow && !state.htmlMode
     ? `mailto:${previewTo}?subject=${encodeURIComponent(previewSubject)}&body=${encodeURIComponent(previewBody)}`.length
     : 0;
   const overLimit = mailtoLen > 2000;
-
-  // Template slot manager
-  const [slotName, setSlotName] = useState("");
-  const [slotPickerOpen, setSlotPickerOpen] = useState(false);
-  const saveSlot = () => {
-    const name = slotName.trim();
-    if (!name) { toast.error("Slot name required"); return; }
-    const next = state.templateSlotsA.filter((s) => s.name !== name);
-    next.push({ name, subject: state.subjectA, body: state.bodyA });
-    patch({ templateSlotsA: next });
-    setSlotName("");
-    toast.success(`Saved slot "${name}"`);
-  };
-  const loadSlot = (name: string) => {
-    const slot = state.templateSlotsA.find((s) => s.name === name);
-    if (!slot) return;
-    patch({ subjectA: slot.subject, bodyA: slot.body });
-    setSlotPickerOpen(false);
-    toast.success(`Loaded "${name}"`);
-  };
-  const deleteSlot = (name: string) => {
-    patch({ templateSlotsA: state.templateSlotsA.filter((s) => s.name !== name) });
-    toast.success(`Deleted "${name}"`);
-  };
 
   return (
     <div className="space-y-4 rounded-xl border border-border-strong/70 bg-surface-1 p-4">
@@ -953,63 +1181,67 @@ function SectionACard({
         />
       </label>
 
-      {/* Template slot manager */}
-      <div className="flex flex-wrap items-center gap-2 rounded-lg border border-border-strong/60 bg-surface-2 p-2">
-        <span className="font-mono-data text-[10px] uppercase tracking-wider text-muted-foreground">
-          Template slots
-        </span>
-        <Input
-          value={slotName}
-          onChange={(e) => setSlotName(e.target.value)}
-          placeholder="Name (e.g. Klaviyo Hook)"
-          className="h-8 max-w-[180px] font-mono-data text-xs"
-        />
-        <Button size="sm" variant="ghost" onClick={saveSlot} className="h-8">
-          <Save className="size-3.5" /> Save
-        </Button>
-        <div className="relative">
-          <Button
-            size="sm"
-            variant="ghost"
-            className="h-8"
-            onClick={() => setSlotPickerOpen((v) => !v)}
-            disabled={state.templateSlotsA.length === 0}
+      {/* Active Template Dropdown + rotation toggles */}
+      <div className="space-y-2 rounded-lg border border-border-strong/60 bg-surface-2 p-3">
+        <div className="flex flex-wrap items-center gap-2">
+          <Label className="font-mono-data text-[10px] uppercase tracking-wider text-muted-foreground">
+            Active template
+          </Label>
+          <select
+            value={state.activeTemplateId}
+            onChange={(e) => patch({ activeTemplateId: e.target.value })}
+            className="h-8 flex-1 min-w-[160px] rounded-md border border-border-strong/70 bg-bg-app px-2 font-mono-data text-xs outline-none focus:glow-sky"
           >
-            Load ({state.templateSlotsA.length}) ▾
-          </Button>
-          {slotPickerOpen && state.templateSlotsA.length > 0 && (
-            <div className="absolute right-0 z-20 mt-1 w-56 rounded-md border border-border-strong/70 bg-surface-1 p-1 shadow-lg">
-              {state.templateSlotsA.map((s) => (
-                <div key={s.name} className="flex items-center gap-1">
-                  <button
-                    type="button"
-                    onClick={() => loadSlot(s.name)}
-                    className="flex-1 truncate rounded px-2 py-1.5 text-left font-mono-data text-xs hover:bg-surface-2"
-                  >
-                    {s.name}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => deleteSlot(s.name)}
-                    aria-label={`Delete ${s.name}`}
-                    className="rounded px-1.5 py-1 text-muted-foreground hover:text-destructive"
-                  >
-                    <Trash2 className="size-3" />
-                  </button>
-                </div>
-              ))}
-            </div>
-          )}
+            {state.templates.map((t) => (
+              <option key={t.id} value={t.id}>{t.name}</option>
+            ))}
+          </select>
+          <span className="font-mono-data text-[10px] text-muted-foreground">
+            {state.templates.length} total
+          </span>
         </div>
+        <div className="grid gap-2 sm:grid-cols-2">
+          <label className="flex items-center justify-between gap-2 rounded border border-border-strong/40 bg-bg-app px-2 py-1.5">
+            <span className="flex items-center gap-1.5 font-mono-data text-[11px] text-foreground">
+              <Shuffle className="size-3 text-sky-glow" /> Rotate Subjects
+            </span>
+            <input
+              type="checkbox"
+              checked={state.rotateSubjects}
+              onChange={(e) => patch({ rotateSubjects: e.target.checked })}
+              className="size-4 accent-[var(--sky)]"
+            />
+          </label>
+          <label className="flex items-center justify-between gap-2 rounded border border-border-strong/40 bg-bg-app px-2 py-1.5">
+            <span className="flex items-center gap-1.5 font-mono-data text-[11px] text-foreground">
+              <Shuffle className="size-3 text-amber-glow" /> Rotate Body
+            </span>
+            <input
+              type="checkbox"
+              checked={state.rotateBodies}
+              onChange={(e) => patch({ rotateBodies: e.target.checked })}
+              className="size-4 accent-[var(--amber)]"
+            />
+          </label>
+        </div>
+        {(state.rotateSubjects || state.rotateBodies) && state.templates.length > 1 && (
+          <p className="font-mono-data text-[10px] text-muted-foreground">
+            Next send → <span className="text-sky-glow">{rotation.rotName}</span> (slot #{rotation.rotIndex + 1}/{state.templates.length})
+          </p>
+        )}
       </div>
+
+      <SpamHealthCheck
+        subject={activeTemplate.subject}
+        body={state.htmlMode ? activeTemplate.html : activeTemplate.body}
+        html={state.htmlMode ? activeTemplate.html : ""}
+      />
 
       <div className="grid gap-3 sm:grid-cols-2">
         <Field label="Subject template">
           <Input
-            value={state.htmlMode ? state.subjectB : state.subjectA}
-            onChange={(e) =>
-              patch(state.htmlMode ? { subjectB: e.target.value } : { subjectA: e.target.value })
-            }
+            value={activeTemplate.subject}
+            onChange={(e) => updateTemplate(activeTemplate.id, { subject: e.target.value })}
             className="font-mono-data"
             placeholder="Hi {first_name}…"
           />
@@ -1028,13 +1260,13 @@ function SectionACard({
           <Field label="HTML code template">
             <HtmlToolbar
               textareaRef={htmlTextareaRef}
-              value={state.htmlB}
-              onChange={(v) => patch({ htmlB: v })}
+              value={activeTemplate.html}
+              onChange={(v) => updateTemplate(activeTemplate.id, { html: v })}
             />
             <Textarea
               ref={htmlTextareaRef}
-              value={state.htmlB}
-              onChange={(e) => patch({ htmlB: e.target.value })}
+              value={activeTemplate.html}
+              onChange={(e) => updateTemplate(activeTemplate.id, { html: e.target.value })}
               rows={8}
               className="font-mono-data text-[12px] leading-relaxed rounded-t-none border-t-0"
               spellCheck={false}
@@ -1052,7 +1284,7 @@ function SectionACard({
               <iframe
                 title="HTML preview"
                 sandbox=""
-                srcDoc={`<!doctype html><html><body style="margin:0;padding:12px;font-family:system-ui">${autoFormatHtml(renderTemplate(state.htmlB, previewRow ?? sampleRow))}</body></html>`}
+                srcDoc={`<!doctype html><html><body style="margin:0;padding:12px;font-family:system-ui">${autoFormatHtml(renderTemplate(activeTemplate.html, previewRow ?? sampleRow))}</body></html>`}
                 className="block h-[300px] w-full"
               />
             </div>
@@ -1097,8 +1329,8 @@ function SectionACard({
         <>
           <Field label="Plain-text body template">
             <Textarea
-              value={state.bodyA}
-              onChange={(e) => patch({ bodyA: e.target.value })}
+              value={activeTemplate.body}
+              onChange={(e) => updateTemplate(activeTemplate.id, { body: e.target.value })}
               rows={6}
               className="font-mono-data text-[13px]"
               placeholder="Hi {first_name}, …"
@@ -1340,10 +1572,10 @@ function SectionACard({
             rowIndex={nextPendingIndex}
             row={state.rows[nextPendingIndex]}
             targetEmailHeader={state.targetEmailHeader}
-            subjectTpl={state.htmlMode ? state.subjectB : state.subjectA}
-            bodyTpl={state.bodyA}
+            subjectTpl={rotation.subject}
+            bodyTpl={rotation.body}
             htmlMode={state.htmlMode}
-            htmlTpl={state.htmlB}
+            htmlTpl={rotation.html}
             onSend={() => {
               fireRow(nextPendingIndex);
               if (activeOverride !== null) {
@@ -1629,6 +1861,309 @@ function HtmlToolbar({
       <button type="button" title="Insert link" className={btn} onClick={insertLink}><Link2 className="size-3.5" /></button>
       <button type="button" title="Horizontal rule" className={btn} onClick={insertHr}><Minus className="size-3.5" /></button>
       <button type="button" title="Line break (<br />)" className={btn} onClick={insertBreak}><CornerDownLeft className="size-3.5" /></button>
+    </div>
+  );
+}
+
+/* ===================== Session Stats Strip ===================== */
+
+function fmtDuration(sec: number) {
+  const h = Math.floor(sec / 3600);
+  const m = Math.floor((sec % 3600) / 60);
+  const s = sec % 60;
+  if (h > 0) return `${h}h ${m}m ${s}s`;
+  if (m > 0) return `${m}m ${s}s`;
+  return `${s}s`;
+}
+
+function SessionStats({
+  processedCount, totalRows, dailyGoal, onDailyGoal, velocity30, sessionSeconds,
+}: {
+  processedCount: number;
+  totalRows: number;
+  dailyGoal: number;
+  onDailyGoal: (n: number) => void;
+  velocity30: number;
+  sessionSeconds: number;
+}) {
+  const [open, setOpen] = useState(true);
+  const goal = Math.max(1, dailyGoal || 1);
+  const pct = Math.min(100, Math.round((processedCount / goal) * 100));
+  return (
+    <section className="mb-3 rounded-xl border border-border-strong/70 bg-surface-1 p-3">
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        className="flex w-full items-center justify-between gap-2"
+      >
+        <span className="flex items-center gap-2 font-mono-data text-[11px] uppercase tracking-wider text-muted-foreground">
+          <Activity className="size-3.5 text-sky-glow" /> Session stats
+        </span>
+        <span className="flex items-center gap-3 font-mono-data text-[11px] text-muted-foreground">
+          <span><span className="text-foreground">{processedCount}</span> / {goal}</span>
+          <span>{velocity30}/30m</span>
+          <span>{fmtDuration(sessionSeconds)}</span>
+          {open ? <ChevronUp className="size-3.5" /> : <ChevronDown className="size-3.5" />}
+        </span>
+      </button>
+      {open && (
+        <div className="mt-3 space-y-3">
+          <div>
+            <div className="mb-1 flex items-center justify-between font-mono-data text-[10px] uppercase tracking-wider text-muted-foreground">
+              <span>Daily progress</span>
+              <span>{pct}%</span>
+            </div>
+            <div className="h-2 w-full overflow-hidden rounded-full bg-surface-2">
+              <div
+                className="h-full bg-[var(--sky)] transition-[width] duration-300"
+                style={{ width: `${pct}%` }}
+              />
+            </div>
+          </div>
+          <div className="grid gap-2 sm:grid-cols-3">
+            <div className="rounded border border-border-strong/40 bg-surface-2 p-2">
+              <div className="font-mono-data text-[10px] uppercase text-muted-foreground">Targets</div>
+              <div className="font-mono-data text-sm text-foreground">
+                {processedCount.toLocaleString()} / {goal.toLocaleString()}
+              </div>
+              <Input
+                type="number"
+                min={1}
+                value={dailyGoal}
+                onChange={(e) => onDailyGoal(Math.max(1, Number(e.target.value) || 1))}
+                className="mt-1 h-7 font-mono-data text-xs"
+              />
+            </div>
+            <div className="rounded border border-border-strong/40 bg-surface-2 p-2">
+              <div className="font-mono-data text-[10px] uppercase text-muted-foreground">Velocity (30m)</div>
+              <div className="font-mono-data text-sm text-amber-glow">{velocity30} sent</div>
+              <div className="font-mono-data text-[10px] text-muted-foreground">
+                {totalRows ? `${totalRows.toLocaleString()} rows loaded` : "no file"}
+              </div>
+            </div>
+            <div className="rounded border border-border-strong/40 bg-surface-2 p-2">
+              <div className="font-mono-data text-[10px] uppercase text-muted-foreground">Session timer</div>
+              <div className="font-mono-data text-sm text-sky-glow">{fmtDuration(sessionSeconds)}</div>
+              <div className="font-mono-data text-[10px] text-muted-foreground">since page load</div>
+            </div>
+          </div>
+        </div>
+      )}
+    </section>
+  );
+}
+
+/* ===================== Resume banner ===================== */
+
+function ResumeBanner({
+  lastRow, ts, onRestore, onDismiss,
+}: { lastRow: number; ts: number; onRestore: () => void; onDismiss: () => void }) {
+  const ago = ts ? Math.max(0, Math.floor((Date.now() - ts) / 60000)) : 0;
+  return (
+    <div className="mb-3 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-sky-glow/40 bg-sky-glow/5 px-3 py-2">
+      <div className="flex items-center gap-2 font-mono-data text-xs text-foreground">
+        <History className="size-3.5 text-sky-glow" />
+        Resume your previous session at Row <span className="text-sky-glow">#{lastRow}</span>?
+        {ago > 0 && <span className="text-muted-foreground">· {ago}m ago</span>}
+      </div>
+      <div className="flex gap-2">
+        <Button size="sm" variant="ghost" onClick={onDismiss}>Dismiss</Button>
+        <Button size="sm" onClick={onRestore} className="glow-sky bg-[var(--sky)] text-black hover:bg-[var(--sky)]/90">
+          Restore
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+/* ===================== Template Control Panel ===================== */
+
+function TemplateControlPanel({
+  templates, activeTemplateId, onSelect, onUpdate, onAdd, onDelete,
+}: {
+  templates: TemplateItem[];
+  activeTemplateId: string;
+  onSelect: (id: string) => void;
+  onUpdate: (id: string, p: Partial<TemplateItem>) => void;
+  onAdd: () => void;
+  onDelete: (id: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  return (
+    <section className="mb-3 rounded-xl border border-border-strong/70 bg-surface-1">
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        className="flex w-full items-center justify-between gap-2 p-3"
+      >
+        <span className="flex items-center gap-2 font-mono-data text-[11px] uppercase tracking-wider text-muted-foreground">
+          <Layers className="size-3.5 text-amber-glow" /> Template Control Panel
+        </span>
+        <span className="flex items-center gap-2 font-mono-data text-[11px] text-muted-foreground">
+          {templates.length} template{templates.length === 1 ? "" : "s"}
+          {open ? <ChevronUp className="size-3.5" /> : <ChevronDown className="size-3.5" />}
+        </span>
+      </button>
+      {open && (
+        <div className="space-y-3 border-t border-border-strong/40 p-3">
+          <div className="flex items-center justify-between gap-2">
+            <p className="font-mono-data text-[10px] text-muted-foreground">
+              Edit every template's Subject &amp; Body. The dropdown below feeds the live preview.
+            </p>
+            <Button size="sm" onClick={onAdd} className="h-8">
+              <Plus className="size-3.5" /> Add Template
+            </Button>
+          </div>
+          <div className="space-y-3">
+            {templates.map((t, idx) => {
+              const isActive = t.id === activeTemplateId;
+              return (
+                <div
+                  key={t.id}
+                  className={`rounded-lg border p-3 ${
+                    isActive ? "border-sky-glow/60 bg-sky-glow/5" : "border-border-strong/40 bg-surface-2"
+                  }`}
+                >
+                  <div className="mb-2 flex flex-wrap items-center gap-2">
+                    <span className="font-mono-data text-[10px] uppercase text-muted-foreground">#{idx + 1}</span>
+                    <Input
+                      value={t.name}
+                      onChange={(e) => onUpdate(t.id, { name: e.target.value })}
+                      className="h-7 max-w-[200px] font-mono-data text-xs"
+                      placeholder="Template name"
+                    />
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className="h-7"
+                      onClick={() => onSelect(t.id)}
+                      disabled={isActive}
+                    >
+                      {isActive ? "Active" : "Activate"}
+                    </Button>
+                    <div className="ml-auto">
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        className="h-7 text-destructive hover:bg-destructive/10"
+                        onClick={() => onDelete(t.id)}
+                        aria-label={`Delete ${t.name}`}
+                      >
+                        <Trash2 className="size-3.5" />
+                      </Button>
+                    </div>
+                  </div>
+                  <div className="grid gap-2">
+                    <Input
+                      value={t.subject}
+                      onChange={(e) => onUpdate(t.id, { subject: e.target.value })}
+                      placeholder="Subject"
+                      className="h-8 font-mono-data text-xs"
+                    />
+                    <Textarea
+                      value={t.body}
+                      onChange={(e) => onUpdate(t.id, { body: e.target.value })}
+                      placeholder="Plain-text body"
+                      rows={3}
+                      className="font-mono-data text-[12px]"
+                    />
+                    <Textarea
+                      value={t.html}
+                      onChange={(e) => onUpdate(t.id, { html: e.target.value })}
+                      placeholder="HTML body"
+                      rows={3}
+                      className="font-mono-data text-[12px]"
+                      spellCheck={false}
+                    />
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+    </section>
+  );
+}
+
+/* ===================== Spam / Link Health Check ===================== */
+
+function SpamHealthCheck({
+  subject, body, html,
+}: { subject: string; body: string; html: string }) {
+  const subj = useMemo(() => scanSpam(subject), [subject]);
+  const bod = useMemo(() => scanSpam(body), [body]);
+  const links = useMemo(() => (html ? scanLinks(html) : { ok: 0, broken: [] as { tag: string; reason: string }[] }), [html]);
+  const totalHits = subj.hits.length + bod.hits.length;
+  const hot = totalHits > 0 || subj.exclaim > 2 || bod.exclaim > 4 || links.broken.length > 0;
+  return (
+    <div
+      className={`rounded-lg border p-3 ${
+        hot ? "border-amber-glow/60 bg-amber-glow/10" : "border-border-strong/60 bg-surface-2"
+      }`}
+    >
+      <div className="mb-2 flex items-center gap-2 font-mono-data text-[10px] uppercase tracking-wider text-muted-foreground">
+        <ShieldAlert className={`size-3.5 ${hot ? "text-amber-glow" : "text-sky-glow"}`} />
+        Health check
+        <span className={`ml-auto font-mono-data text-[10px] ${hot ? "text-amber-glow" : "text-sky-glow"}`}>
+          {hot ? "review" : "clean"}
+        </span>
+      </div>
+      <div className="grid gap-2 sm:grid-cols-2">
+        <div className="space-y-1">
+          <div className="font-mono-data text-[10px] uppercase text-muted-foreground">Subject</div>
+          {subj.hits.length === 0 && subj.exclaim <= 2 && subj.allCaps === 0 ? (
+            <p className="font-mono-data text-[11px] text-muted-foreground">No spam triggers detected.</p>
+          ) : (
+            <div className="flex flex-wrap gap-1">
+              {subj.hits.map((h) => (
+                <span key={h} className="rounded border border-amber-glow/40 bg-amber-glow/15 px-1.5 py-0.5 font-mono-data text-[10px] text-amber-glow">{h}</span>
+              ))}
+              {subj.exclaim > 2 && (
+                <span className="rounded border border-amber-glow/40 bg-amber-glow/15 px-1.5 py-0.5 font-mono-data text-[10px] text-amber-glow">{subj.exclaim}×!</span>
+              )}
+              {subj.allCaps > 0 && (
+                <span className="rounded border border-amber-glow/40 bg-amber-glow/15 px-1.5 py-0.5 font-mono-data text-[10px] text-amber-glow">{subj.allCaps} CAPS</span>
+              )}
+            </div>
+          )}
+        </div>
+        <div className="space-y-1">
+          <div className="font-mono-data text-[10px] uppercase text-muted-foreground">Body</div>
+          {bod.hits.length === 0 && bod.exclaim <= 4 && bod.allCaps === 0 ? (
+            <p className="font-mono-data text-[11px] text-muted-foreground">No spam triggers detected.</p>
+          ) : (
+            <div className="flex flex-wrap gap-1">
+              {bod.hits.map((h) => (
+                <span key={h} className="rounded border border-amber-glow/40 bg-amber-glow/15 px-1.5 py-0.5 font-mono-data text-[10px] text-amber-glow">{h}</span>
+              ))}
+              {bod.exclaim > 4 && (
+                <span className="rounded border border-amber-glow/40 bg-amber-glow/15 px-1.5 py-0.5 font-mono-data text-[10px] text-amber-glow">{bod.exclaim}×!</span>
+              )}
+              {bod.allCaps > 0 && (
+                <span className="rounded border border-amber-glow/40 bg-amber-glow/15 px-1.5 py-0.5 font-mono-data text-[10px] text-amber-glow">{bod.allCaps} CAPS</span>
+              )}
+            </div>
+          )}
+        </div>
+      </div>
+      {html && (
+        <div className="mt-2 space-y-1">
+          <div className="font-mono-data text-[10px] uppercase text-muted-foreground">
+            Links · <span className="text-sky-glow">{links.ok} ok</span>
+            {links.broken.length > 0 && <> · <span className="text-amber-glow">{links.broken.length} broken</span></>}
+          </div>
+          {links.broken.length > 0 && (
+            <ul className="space-y-0.5">
+              {links.broken.slice(0, 4).map((b, i) => (
+                <li key={i} className="font-mono-data text-[10px] text-amber-glow">
+                  ⚠ {b.reason}: <span className="text-muted-foreground">{b.tag.slice(0, 60)}</span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
     </div>
   );
 }
