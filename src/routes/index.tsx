@@ -331,6 +331,61 @@ function Index() {
     setState((s) => ({ ...s, ...p }));
   }, []);
 
+  /* ---------- Templates / rotation helpers ---------- */
+  const activeTemplate: TemplateItem = useMemo(() => {
+    const found = state.templates.find((t) => t.id === state.activeTemplateId);
+    if (found) return found;
+    return state.templates[0] ?? { id: "", name: "Default", subject: state.subjectA, body: state.bodyA, html: state.htmlB };
+  }, [state.templates, state.activeTemplateId, state.subjectA, state.bodyA, state.htmlB]);
+
+  const updateTemplate = useCallback((id: string, partial: Partial<TemplateItem>) => {
+    setState((s) => ({
+      ...s,
+      templates: s.templates.map((t) => (t.id === id ? { ...t, ...partial } : t)),
+    }));
+  }, []);
+  const addTemplate = useCallback(() => {
+    const id = newId();
+    const next: TemplateItem = {
+      id,
+      name: `Template ${state.templates.length + 1}`,
+      subject: activeTemplate.subject,
+      body: activeTemplate.body,
+      html: activeTemplate.html,
+    };
+    setState((s) => ({ ...s, templates: [...s.templates, next], activeTemplateId: id }));
+    toast.success(`Added "${next.name}"`);
+  }, [state.templates.length, activeTemplate]);
+  const deleteTemplate = useCallback((id: string) => {
+    setState((s) => {
+      if (s.templates.length <= 1) {
+        toast.error("Keep at least one template");
+        return s;
+      }
+      const remaining = s.templates.filter((t) => t.id !== id);
+      return {
+        ...s,
+        templates: remaining,
+        activeTemplateId: s.activeTemplateId === id ? remaining[0].id : s.activeTemplateId,
+      };
+    });
+  }, []);
+
+  /** Resolve the (subject, body, html) actually used for the NEXT send,
+   *  honoring rotation toggles. */
+  const rotation = useMemo(() => {
+    const n = state.templates.length || 1;
+    const idx = ((state.sendCounter % n) + n) % n;
+    const rotTpl = state.templates[idx] ?? activeTemplate;
+    return {
+      subject: state.rotateSubjects ? rotTpl.subject : activeTemplate.subject,
+      body: state.rotateBodies ? rotTpl.body : activeTemplate.body,
+      html: state.rotateBodies ? rotTpl.html : activeTemplate.html,
+      rotIndex: idx,
+      rotName: rotTpl.name,
+    };
+  }, [state.templates, state.sendCounter, state.rotateSubjects, state.rotateBodies, activeTemplate]);
+
   /* ---------- CSV Parse (streaming, off main work via Papa worker) ---------- */
 
   const onFile = useCallback((file: File) => {
@@ -493,7 +548,12 @@ function Index() {
       toast.error(`Row ${rowIndex} missing "${state.targetEmailHeader}"`);
       return;
     }
-    setState((s) => ({ ...s, rowStates: { ...s.rowStates, [rowIndex]: "processed" } }));
+    setState((s) => ({
+      ...s,
+      rowStates: { ...s.rowStates, [rowIndex]: "processed" },
+      sendCounter: s.sendCounter + 1,
+    }));
+    sendLogRef.current.push(Date.now());
   }, [state.rows, state.targetEmailHeader, state.subjectA, state.bodyA]);
 
   const skipRow = useCallback((rowIndex: number) => {
@@ -522,10 +582,13 @@ function Index() {
 
   const sampleRow = state.rows[state.sampleIdB];
   const renderedHtml = useMemo(
-    () => autoFormatHtml(renderTemplate(state.htmlB, sampleRow)),
-    [state.htmlB, sampleRow],
+    () => autoFormatHtml(renderTemplate(activeTemplate.html, sampleRow)),
+    [activeTemplate.html, sampleRow],
   );
-  const renderedSubjectB = useMemo(() => renderTemplate(state.subjectB, sampleRow), [state.subjectB, sampleRow]);
+  const renderedSubjectB = useMemo(
+    () => renderTemplate(activeTemplate.subject, sampleRow),
+    [activeTemplate.subject, sampleRow],
+  );
 
   const executeHtml = useCallback(async () => {
     const recipients = cleanEmails(state.recipientB);
@@ -552,17 +615,74 @@ function Index() {
 
   /* Plain-text test sandbox: uses sample row + manual recipient, opens mailto with subject+body. */
   const renderedSubjectAPreview = useMemo(
-    () => renderTemplate(state.subjectA, sampleRow),
-    [state.subjectA, sampleRow],
+    () => renderTemplate(activeTemplate.subject, sampleRow),
+    [activeTemplate.subject, sampleRow],
   );
   const executePlainTest = useCallback(() => {
     const recipients = cleanEmails(state.recipientB);
     if (!recipients) { toast.error("Recipient required"); return; }
-    const subject = renderTemplate(state.subjectA, sampleRow);
-    const body = renderTemplate(state.bodyA, sampleRow);
+    const subject = renderTemplate(activeTemplate.subject, sampleRow);
+    const body = renderTemplate(activeTemplate.body, sampleRow);
     toast.success("Opening test draft…");
     window.location.href = buildMailto(state.recipientB, { subject, body });
-  }, [state.recipientB, state.subjectA, state.bodyA, sampleRow]);
+  }, [state.recipientB, activeTemplate, sampleRow]);
+
+  /* ---------- Session stats / autosave / resume ---------- */
+  const sessionStartRef = useRef<number>(Date.now());
+  const sendLogRef = useRef<number[]>([]);
+  const [, forceTick] = useState(0);
+  useEffect(() => {
+    const id = window.setInterval(() => forceTick((n) => n + 1), 1000);
+    return () => window.clearInterval(id);
+  }, []);
+
+  // 10s autosave heartbeat
+  useEffect(() => {
+    if (!hydrated) return;
+    const id = window.setInterval(() => {
+      try {
+        const firstPending = (() => {
+          for (let i = 0; i < state.rows.length; i++) {
+            if (!state.rowStates[i]) return i;
+          }
+          return state.rows.length;
+        })();
+        localStorage.setItem(AUTOSAVE_KEY, JSON.stringify(state));
+        localStorage.setItem(
+          SESSION_META_KEY,
+          JSON.stringify({ ts: Date.now(), lastRow: firstPending, total: state.rows.length }),
+        );
+      } catch {}
+    }, 10_000);
+    return () => window.clearInterval(id);
+  }, [state, hydrated]);
+
+  const [resume, setResume] = useState<{ lastRow: number; ts: number } | null>(null);
+  useEffect(() => {
+    if (!hydrated) return;
+    try {
+      const raw = localStorage.getItem(SESSION_META_KEY);
+      if (!raw) return;
+      const meta = JSON.parse(raw);
+      if (typeof meta?.lastRow === "number" && meta.lastRow > 0 && state.rows.length > 0) {
+        setResume({ lastRow: meta.lastRow, ts: meta.ts ?? 0 });
+      }
+    } catch {}
+  }, [hydrated]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const [resumeTarget, setResumeTarget] = useState<number | null>(null);
+  const acceptResume = useCallback(() => {
+    if (resume) setResumeTarget(resume.lastRow);
+    setResume(null);
+  }, [resume]);
+
+  // Velocity (last 30 min)
+  const velocity30 = useMemo(() => {
+    const cutoff = Date.now() - 30 * 60_000;
+    sendLogRef.current = sendLogRef.current.filter((t) => t > cutoff - 1);
+    return sendLogRef.current.length;
+  }, [state.sendCounter]); // eslint-disable-line react-hooks/exhaustive-deps
+  const sessionSeconds = Math.floor((Date.now() - sessionStartRef.current) / 1000);
 
   /* ---------- UI ---------- */
 
@@ -580,6 +700,30 @@ function Index() {
 
       <main className="mx-auto max-w-5xl px-3 pb-24 pt-4 sm:px-6">
         <DragContext.Provider value={{ dragUnlocked, dragPos, setDragPos }}>
+        <SessionStats
+          processedCount={processedCount}
+          totalRows={state.rows.length}
+          dailyGoal={state.dailyGoal}
+          onDailyGoal={(n) => patch({ dailyGoal: n })}
+          velocity30={velocity30}
+          sessionSeconds={sessionSeconds}
+        />
+        {resume && (
+          <ResumeBanner
+            lastRow={resume.lastRow}
+            ts={resume.ts}
+            onRestore={acceptResume}
+            onDismiss={() => setResume(null)}
+          />
+        )}
+        <TemplateControlPanel
+          templates={state.templates}
+          activeTemplateId={state.activeTemplateId}
+          onSelect={(id) => patch({ activeTemplateId: id })}
+          onUpdate={updateTemplate}
+          onAdd={addTemplate}
+          onDelete={deleteTemplate}
+        />
         <IngestPanel
           parsing={parsing}
           progress={parseProgress}
@@ -606,6 +750,11 @@ function Index() {
             executeTestPlain={executePlainTest}
             renderedTestSubjectPlain={renderedSubjectAPreview}
             sampleRow={sampleRow}
+            activeTemplate={activeTemplate}
+            updateTemplate={updateTemplate}
+            rotation={rotation}
+            resumeTarget={resumeTarget}
+            onConsumeResume={() => setResumeTarget(null)}
           />
         </div>
         </DragContext.Provider>
