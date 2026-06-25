@@ -146,11 +146,54 @@ function scanLinks(html: string): { ok: number; broken: { tag: string; reason: s
 
 const TOKEN_RE = /\{([^{}]+)\}/g;
 
-function renderTemplate(tpl: string, row: Row | undefined): string {
-  if (!row) return tpl;
-  return tpl.replace(TOKEN_RE, (_, key: string) => {
+/**
+ * Expand Spintax — {a|b|c} — picking ONE variant randomly per occurrence.
+ * Iterates innermost-first so nested groups like {Hi|{Hello|Hey}} work.
+ */
+function expandSpintax(src: string): string {
+  if (!src || src.indexOf("{") === -1) return src;
+  const inner = /\{([^{}]*\|[^{}]*)\}/;
+  let out = src;
+  let guard = 0;
+  while (inner.test(out) && guard++ < 500) {
+    out = out.replace(inner, (_, body: string) => {
+      const opts = body.split("|");
+      return opts[Math.floor(Math.random() * opts.length)] ?? "";
+    });
+  }
+  return out;
+}
+
+/**
+ * Convert an ugly spreadsheet token value (ALL CAPS or all lowercase)
+ * into clean Title Case so it reads as if a human typed it.
+ * Skips email-like values and values that already mix cases.
+ */
+function titleCaseToken(v: string): string {
+  if (!v) return v;
+  if (v.includes("@")) return v;
+  const letters = v.replace(/[^A-Za-z]/g, "");
+  if (letters.length < 2) return v;
+  const isAllUpper = letters === letters.toUpperCase();
+  const isAllLower = letters === letters.toLowerCase();
+  if (!isAllUpper && !isAllLower) return v;
+  return v.toLowerCase().replace(/\b([a-z])([a-z0-9'’\-]*)/g, (_, a: string, b: string) =>
+    a.toUpperCase() + b,
+  );
+}
+
+function renderTemplate(
+  tpl: string,
+  row: Row | undefined,
+  extras?: Record<string, string>,
+): string {
+  const expanded = expandSpintax(tpl);
+  return expanded.replace(TOKEN_RE, (_, key: string) => {
     const k = key.trim();
-    return row[k] ?? "";
+    if (extras && k in extras) return extras[k] ?? "";
+    const raw = row?.[k];
+    if (raw === undefined || raw === null || raw === "") return "";
+    return titleCaseToken(String(raw));
   });
 }
 
