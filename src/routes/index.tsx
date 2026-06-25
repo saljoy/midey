@@ -1197,7 +1197,7 @@ function SectionACard({
   state, patch, queue, processedCount, fireRow, skipRow,
   executeTestHtml, renderedTestHtml, renderedTestSubject, sampleRow,
   executeTestPlain, renderedTestSubjectPlain,
-  activeTemplate, updateTemplate, rotation, resumeTarget, onConsumeResume,
+  activeTemplate, updateTemplate, rotation, resumeTarget, onConsumeResume, ai,
 }: {
   state: PersistedState;
   patch: (p: Partial<PersistedState>) => void;
@@ -1217,6 +1217,7 @@ function SectionACard({
   rotation: { subject: string; body: string; html: string; rotIndex: number; rotName: string };
   resumeTarget: number | null;
   onConsumeResume: () => void;
+  ai: AISettings;
 }) {
   const firstPendingIndex = queue.find(
     (i) => (state.rowStates[i] ?? "pending") === "pending",
