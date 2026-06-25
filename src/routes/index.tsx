@@ -1814,6 +1814,23 @@ function NextRowPreview({
         </div>
       </div>
       <div className="space-y-2 rounded-md border border-border-strong/60 bg-surface-2 p-3">
+        {usesAi && (
+          <div className="font-mono-data text-[10px] uppercase tracking-wider">
+            {aiLoading ? (
+              <span className="inline-flex items-center gap-1.5 text-sky-glow">
+                <span className="size-1.5 animate-pulse rounded-full bg-sky-glow" />
+                Generating personal insight…
+              </span>
+            ) : (
+              <span className="text-muted-foreground">
+                AI insight ·{" "}
+                <span className="text-sky-glow normal-case tracking-normal">
+                  {aiInsight || ai.fallback}
+                </span>
+              </span>
+            )}
+          </div>
+        )}
         <div className="font-mono-data text-[11px]">
           <span className="text-muted-foreground">To: </span>
           <span className="text-foreground">{toAddr || <span className="text-destructive">— missing —</span>}</span>
