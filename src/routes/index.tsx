@@ -2338,3 +2338,121 @@ function SpamHealthCheck({
     </div>
   );
 }
+
+/* ===================== AI Personalization Panel ===================== */
+
+function AIPersonalizationPanel({
+  ai, onChange,
+}: { ai: AISettings; onChange: (next: AISettings) => void }) {
+  const [open, setOpen] = useState(false);
+  const [reveal, setReveal] = useState(false);
+  const set = <K extends keyof AISettings>(k: K, v: AISettings[K]) =>
+    onChange({ ...ai, [k]: v });
+  return (
+    <section className="mb-3 rounded-xl border border-border-strong/70 bg-surface-1">
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        className="flex w-full items-center justify-between gap-2 p-3"
+      >
+        <span className="flex items-center gap-2 font-mono-data text-[11px] uppercase tracking-wider text-muted-foreground">
+          <Zap className="size-3.5 text-sky-glow" />
+          AI Personalization · {"{ai_insight}"}
+          <span
+            className={`ml-1 rounded px-1.5 py-0.5 text-[10px] ${
+              ai.enabled && ai.apiKey
+                ? "border border-sky-glow/40 bg-sky-glow/10 text-sky-glow"
+                : "border border-border-strong/50 bg-bg-app text-muted-foreground"
+            }`}
+          >
+            {ai.enabled && ai.apiKey ? "live" : "off"}
+          </span>
+        </span>
+        <span className="flex items-center gap-2 font-mono-data text-[11px] text-muted-foreground">
+          {ai.provider}
+          {open ? <ChevronUp className="size-3.5" /> : <ChevronDown className="size-3.5" />}
+        </span>
+      </button>
+      {open && (
+        <div className="space-y-3 border-t border-border-strong/40 p-3">
+          <div className="grid gap-2 sm:grid-cols-[auto_1fr_auto] sm:items-center">
+            <label className="flex items-center gap-2 font-mono-data text-[11px] text-foreground">
+              <input
+                type="checkbox"
+                checked={ai.enabled}
+                onChange={(e) => set("enabled", e.target.checked)}
+                className="size-4 accent-[var(--sky)]"
+              />
+              Enable
+            </label>
+            <select
+              value={ai.provider}
+              onChange={(e) => set("provider", e.target.value as "gemini" | "openai")}
+              className="h-8 rounded-md border border-border-strong/70 bg-bg-app px-2 font-mono-data text-xs outline-none focus:glow-sky"
+            >
+              <option value="gemini">Google Gemini</option>
+              <option value="openai">OpenAI</option>
+            </select>
+            <span className="font-mono-data text-[10px] text-muted-foreground">
+              Key saved locally
+            </span>
+          </div>
+          <Field label={`${ai.provider === "gemini" ? "Gemini" : "OpenAI"} API key`}>
+            <div className="flex gap-2">
+              <Input
+                type={reveal ? "text" : "password"}
+                value={ai.apiKey}
+                onChange={(e) => set("apiKey", e.target.value)}
+                placeholder={ai.provider === "gemini" ? "AIza…" : "sk-…"}
+                className="font-mono-data text-xs"
+                autoComplete="off"
+                spellCheck={false}
+              />
+              <Button
+                size="sm"
+                variant="ghost"
+                type="button"
+                onClick={() => setReveal((r) => !r)}
+                className="h-9"
+              >
+                {reveal ? "Hide" : "Show"}
+              </Button>
+            </div>
+          </Field>
+          <div className="grid gap-2 sm:grid-cols-2">
+            <Field label="Store description column">
+              <Input
+                value={ai.descriptionColumn}
+                onChange={(e) => set("descriptionColumn", e.target.value)}
+                placeholder="store_description"
+                className="font-mono-data text-xs"
+              />
+            </Field>
+            <Field label="Fallback phrase">
+              <Input
+                value={ai.fallback}
+                onChange={(e) => set("fallback", e.target.value)}
+                placeholder="your unique collection"
+                className="font-mono-data text-xs"
+              />
+            </Field>
+          </div>
+          <Field label="AI Generation Prompt Blueprint">
+            <Textarea
+              value={ai.prompt}
+              onChange={(e) => set("prompt", e.target.value)}
+              rows={4}
+              className="font-mono-data text-[12px] leading-relaxed"
+              placeholder="Write a brief 7-word phrase about a category they specialize in…"
+            />
+          </Field>
+          <p className="font-mono-data text-[10px] text-muted-foreground">
+            Insert <span className="text-sky-glow">{"{ai_insight}"}</span> anywhere in a Subject or Body template.
+            When the active row exposes <span className="text-sky-glow">{ai.descriptionColumn}</span>, a custom
+            sentence is fetched in the background and injected. Missing data → fallback phrase.
+          </p>
+        </div>
+      )}
+    </section>
+  );
+}
