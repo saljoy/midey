@@ -363,6 +363,13 @@ function Index() {
   const [parsing, setParsing] = useState(false);
   const [parseProgress, setParseProgress] = useState(0);
 
+  // AI settings (persisted independently so the API key never leaves localStorage)
+  const [ai, setAi] = useState<AISettings>(DEFAULT_AI);
+  useEffect(() => {
+    if (!hydrated) return;
+    try { localStorage.setItem(AI_SETTINGS_KEY, JSON.stringify(ai)); } catch {}
+  }, [ai, hydrated]);
+
   // ---- Draggable "Send current" button state ----
   const [dragUnlocked, setDragUnlocked] = useState(false);
   const [dragPos, setDragPos] = useState<{ x: number; y: number } | null>(() => {
@@ -418,6 +425,7 @@ function Index() {
     setState(loadState());
     const t = (localStorage.getItem(THEME_KEY) as "dark" | "light" | null) ?? "dark";
     setTheme(t);
+    setAi(loadAISettings());
     setHydrated(true);
   }, []);
 
