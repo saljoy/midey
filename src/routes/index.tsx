@@ -95,6 +95,74 @@ const DEFAULT_STATE: PersistedState = {
 
 const AUTOSAVE_KEY = "midey.outreach.autosave.v1";
 const SESSION_META_KEY = "midey.outreach.session.v1";
+const AI_SETTINGS_KEY = "midey.outreach.ai.v1";
+
+export interface AISettings {
+  enabled: boolean;
+  provider: "gemini" | "openai";
+  apiKey: string;
+  prompt: string;
+  fallback: string;
+  descriptionColumn: string;
+}
+
+const DEFAULT_AI: AISettings = {
+  enabled: false,
+  provider: "gemini",
+  apiKey: "",
+  prompt:
+    "Analyze the following store description and write a single, natural, brief 7-word phrase complimenting a specific product category they specialize in. Do not use corporate jargon or exclamation marks.",
+  fallback: "your unique collection",
+  descriptionColumn: "store_description",
+};
+
+function loadAISettings(): AISettings {
+  if (typeof window === "undefined") return DEFAULT_AI;
+  try {
+    const raw = localStorage.getItem(AI_SETTINGS_KEY);
+    if (!raw) return DEFAULT_AI;
+    return { ...DEFAULT_AI, ...JSON.parse(raw) };
+  } catch { return DEFAULT_AI; }
+}
+
+async function generateAIInsight(
+  ai: AISettings,
+  description: string,
+  signal?: AbortSignal,
+): Promise<string> {
+  const fullPrompt = `${ai.prompt}\n\nStore description:\n"""${description}"""`;
+  if (ai.provider === "gemini") {
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${encodeURIComponent(ai.apiKey)}`;
+    const res = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ contents: [{ parts: [{ text: fullPrompt }] }] }),
+      signal,
+    });
+    if (!res.ok) throw new Error(`Gemini ${res.status}`);
+    const j = await res.json();
+    const txt = j?.candidates?.[0]?.content?.parts?.[0]?.text;
+    return String(txt || "").trim().replace(/^["'`]+|["'`]+$/g, "");
+  }
+  // OpenAI
+  const res = await fetch("https://api.openai.com/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${ai.apiKey}`,
+    },
+    body: JSON.stringify({
+      model: "gpt-4o-mini",
+      messages: [{ role: "user", content: fullPrompt }],
+      temperature: 0.7,
+    }),
+    signal,
+  });
+  if (!res.ok) throw new Error(`OpenAI ${res.status}`);
+  const j = await res.json();
+  const txt = j?.choices?.[0]?.message?.content;
+  return String(txt || "").trim().replace(/^["'`]+|["'`]+$/g, "");
+}
 
 function newId() {
   return `tpl_${Math.random().toString(36).slice(2, 9)}`;
@@ -146,11 +214,54 @@ function scanLinks(html: string): { ok: number; broken: { tag: string; reason: s
 
 const TOKEN_RE = /\{([^{}]+)\}/g;
 
-function renderTemplate(tpl: string, row: Row | undefined): string {
-  if (!row) return tpl;
-  return tpl.replace(TOKEN_RE, (_, key: string) => {
+/**
+ * Expand Spintax — {a|b|c} — picking ONE variant randomly per occurrence.
+ * Iterates innermost-first so nested groups like {Hi|{Hello|Hey}} work.
+ */
+function expandSpintax(src: string): string {
+  if (!src || src.indexOf("{") === -1) return src;
+  const inner = /\{([^{}]*\|[^{}]*)\}/;
+  let out = src;
+  let guard = 0;
+  while (inner.test(out) && guard++ < 500) {
+    out = out.replace(inner, (_, body: string) => {
+      const opts = body.split("|");
+      return opts[Math.floor(Math.random() * opts.length)] ?? "";
+    });
+  }
+  return out;
+}
+
+/**
+ * Convert an ugly spreadsheet token value (ALL CAPS or all lowercase)
+ * into clean Title Case so it reads as if a human typed it.
+ * Skips email-like values and values that already mix cases.
+ */
+function titleCaseToken(v: string): string {
+  if (!v) return v;
+  if (v.includes("@")) return v;
+  const letters = v.replace(/[^A-Za-z]/g, "");
+  if (letters.length < 2) return v;
+  const isAllUpper = letters === letters.toUpperCase();
+  const isAllLower = letters === letters.toLowerCase();
+  if (!isAllUpper && !isAllLower) return v;
+  return v.toLowerCase().replace(/\b([a-z])([a-z0-9'’\-]*)/g, (_, a: string, b: string) =>
+    a.toUpperCase() + b,
+  );
+}
+
+function renderTemplate(
+  tpl: string,
+  row: Row | undefined,
+  extras?: Record<string, string>,
+): string {
+  const expanded = expandSpintax(tpl);
+  return expanded.replace(TOKEN_RE, (_, key: string) => {
     const k = key.trim();
-    return row[k] ?? "";
+    if (extras && k in extras) return extras[k] ?? "";
+    const raw = row?.[k];
+    if (raw === undefined || raw === null || raw === "") return "";
+    return titleCaseToken(String(raw));
   });
 }
 
@@ -252,6 +363,13 @@ function Index() {
   const [parsing, setParsing] = useState(false);
   const [parseProgress, setParseProgress] = useState(0);
 
+  // AI settings (persisted independently so the API key never leaves localStorage)
+  const [ai, setAi] = useState<AISettings>(DEFAULT_AI);
+  useEffect(() => {
+    if (!hydrated) return;
+    try { localStorage.setItem(AI_SETTINGS_KEY, JSON.stringify(ai)); } catch {}
+  }, [ai, hydrated]);
+
   // ---- Draggable "Send current" button state ----
   const [dragUnlocked, setDragUnlocked] = useState(false);
   const [dragPos, setDragPos] = useState<{ x: number; y: number } | null>(() => {
@@ -307,6 +425,7 @@ function Index() {
     setState(loadState());
     const t = (localStorage.getItem(THEME_KEY) as "dark" | "light" | null) ?? "dark";
     setTheme(t);
+    setAi(loadAISettings());
     setHydrated(true);
   }, []);
 
@@ -724,6 +843,7 @@ function Index() {
           onAdd={addTemplate}
           onDelete={deleteTemplate}
         />
+        <AIPersonalizationPanel ai={ai} onChange={setAi} />
         <IngestPanel
           parsing={parsing}
           progress={parseProgress}
@@ -755,6 +875,7 @@ function Index() {
             rotation={rotation}
             resumeTarget={resumeTarget}
             onConsumeResume={() => setResumeTarget(null)}
+            ai={ai}
           />
         </div>
         </DragContext.Provider>
@@ -1076,7 +1197,7 @@ function SectionACard({
   state, patch, queue, processedCount, fireRow, skipRow,
   executeTestHtml, renderedTestHtml, renderedTestSubject, sampleRow,
   executeTestPlain, renderedTestSubjectPlain,
-  activeTemplate, updateTemplate, rotation, resumeTarget, onConsumeResume,
+  activeTemplate, updateTemplate, rotation, resumeTarget, onConsumeResume, ai,
 }: {
   state: PersistedState;
   patch: (p: Partial<PersistedState>) => void;
@@ -1096,6 +1217,7 @@ function SectionACard({
   rotation: { subject: string; body: string; html: string; rotIndex: number; rotName: string };
   resumeTarget: number | null;
   onConsumeResume: () => void;
+  ai: AISettings;
 }) {
   const firstPendingIndex = queue.find(
     (i) => (state.rowStates[i] ?? "pending") === "pending",
@@ -1591,6 +1713,7 @@ function SectionACard({
               }
             }}
             isResend={state.rowStates[nextPendingIndex] === "processed"}
+            ai={ai}
           />
         )}
       </div>
@@ -1599,7 +1722,7 @@ function SectionACard({
 }
 
 function NextRowPreview({
-  rowIndex, row, targetEmailHeader, subjectTpl, bodyTpl, htmlMode, htmlTpl, onSend, onSkip, isResend,
+  rowIndex, row, targetEmailHeader, subjectTpl, bodyTpl, htmlMode, htmlTpl, onSend, onSkip, isResend, ai,
 }: {
   rowIndex: number;
   row: Row | undefined;
@@ -1611,12 +1734,43 @@ function NextRowPreview({
   onSend: () => void;
   onSkip: () => void;
   isResend?: boolean;
+  ai: AISettings;
 }) {
+  // ---- AI {ai_insight} resolver: fetch when active row exposes a description ----
+  const description = ((row?.[ai.descriptionColumn] ?? "") as string).trim();
+  const usesAi =
+    /\{ai_insight\}/.test(subjectTpl) ||
+    /\{ai_insight\}/.test(bodyTpl) ||
+    /\{ai_insight\}/.test(htmlTpl);
+  const [aiInsight, setAiInsight] = useState<string>("");
+  const [aiLoading, setAiLoading] = useState(false);
+  useEffect(() => {
+    if (!usesAi) { setAiInsight(""); setAiLoading(false); return; }
+    if (!ai.enabled || !ai.apiKey || !description) {
+      setAiInsight(ai.fallback);
+      setAiLoading(false);
+      return;
+    }
+    const ctrl = new AbortController();
+    setAiLoading(true);
+    setAiInsight("");
+    generateAIInsight(ai, description, ctrl.signal)
+      .then((txt) => setAiInsight(txt || ai.fallback))
+      .catch(() => setAiInsight(ai.fallback))
+      .finally(() => setAiLoading(false));
+    return () => ctrl.abort();
+  }, [rowIndex, description, usesAi, ai.enabled, ai.apiKey, ai.provider, ai.prompt, ai.fallback]);
+
+  const extras = useMemo(
+    () => ({ ai_insight: aiLoading ? "…" : (aiInsight || ai.fallback) }),
+    [aiInsight, aiLoading, ai.fallback],
+  );
+
   const rawRecipients = row?.[targetEmailHeader] ?? "";
   const toAddr = cleanEmails(rawRecipients);
-  const subject = renderTemplate(subjectTpl, row);
-  const body = renderTemplate(bodyTpl, row);
-  const renderedHtml = autoFormatHtml(renderTemplate(htmlTpl, row));
+  const subject = renderTemplate(subjectTpl, row, extras);
+  const body = renderTemplate(bodyTpl, row, extras);
+  const renderedHtml = autoFormatHtml(renderTemplate(htmlTpl, row, extras));
   const plainHref = toAddr
     ? buildMailto(rawRecipients, { subject, body })
     : "";
@@ -1660,6 +1814,23 @@ function NextRowPreview({
         </div>
       </div>
       <div className="space-y-2 rounded-md border border-border-strong/60 bg-surface-2 p-3">
+        {usesAi && (
+          <div className="font-mono-data text-[10px] uppercase tracking-wider">
+            {aiLoading ? (
+              <span className="inline-flex items-center gap-1.5 text-sky-glow">
+                <span className="size-1.5 animate-pulse rounded-full bg-sky-glow" />
+                Generating personal insight…
+              </span>
+            ) : (
+              <span className="text-muted-foreground">
+                AI insight ·{" "}
+                <span className="text-sky-glow normal-case tracking-normal">
+                  {aiInsight || ai.fallback}
+                </span>
+              </span>
+            )}
+          </div>
+        )}
         <div className="font-mono-data text-[11px]">
           <span className="text-muted-foreground">To: </span>
           <span className="text-foreground">{toAddr || <span className="text-destructive">— missing —</span>}</span>
@@ -2165,5 +2336,123 @@ function SpamHealthCheck({
         </div>
       )}
     </div>
+  );
+}
+
+/* ===================== AI Personalization Panel ===================== */
+
+function AIPersonalizationPanel({
+  ai, onChange,
+}: { ai: AISettings; onChange: (next: AISettings) => void }) {
+  const [open, setOpen] = useState(false);
+  const [reveal, setReveal] = useState(false);
+  const set = <K extends keyof AISettings>(k: K, v: AISettings[K]) =>
+    onChange({ ...ai, [k]: v });
+  return (
+    <section className="mb-3 rounded-xl border border-border-strong/70 bg-surface-1">
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        className="flex w-full items-center justify-between gap-2 p-3"
+      >
+        <span className="flex items-center gap-2 font-mono-data text-[11px] uppercase tracking-wider text-muted-foreground">
+          <Zap className="size-3.5 text-sky-glow" />
+          AI Personalization · {"{ai_insight}"}
+          <span
+            className={`ml-1 rounded px-1.5 py-0.5 text-[10px] ${
+              ai.enabled && ai.apiKey
+                ? "border border-sky-glow/40 bg-sky-glow/10 text-sky-glow"
+                : "border border-border-strong/50 bg-bg-app text-muted-foreground"
+            }`}
+          >
+            {ai.enabled && ai.apiKey ? "live" : "off"}
+          </span>
+        </span>
+        <span className="flex items-center gap-2 font-mono-data text-[11px] text-muted-foreground">
+          {ai.provider}
+          {open ? <ChevronUp className="size-3.5" /> : <ChevronDown className="size-3.5" />}
+        </span>
+      </button>
+      {open && (
+        <div className="space-y-3 border-t border-border-strong/40 p-3">
+          <div className="grid gap-2 sm:grid-cols-[auto_1fr_auto] sm:items-center">
+            <label className="flex items-center gap-2 font-mono-data text-[11px] text-foreground">
+              <input
+                type="checkbox"
+                checked={ai.enabled}
+                onChange={(e) => set("enabled", e.target.checked)}
+                className="size-4 accent-[var(--sky)]"
+              />
+              Enable
+            </label>
+            <select
+              value={ai.provider}
+              onChange={(e) => set("provider", e.target.value as "gemini" | "openai")}
+              className="h-8 rounded-md border border-border-strong/70 bg-bg-app px-2 font-mono-data text-xs outline-none focus:glow-sky"
+            >
+              <option value="gemini">Google Gemini</option>
+              <option value="openai">OpenAI</option>
+            </select>
+            <span className="font-mono-data text-[10px] text-muted-foreground">
+              Key saved locally
+            </span>
+          </div>
+          <Field label={`${ai.provider === "gemini" ? "Gemini" : "OpenAI"} API key`}>
+            <div className="flex gap-2">
+              <Input
+                type={reveal ? "text" : "password"}
+                value={ai.apiKey}
+                onChange={(e) => set("apiKey", e.target.value)}
+                placeholder={ai.provider === "gemini" ? "AIza…" : "sk-…"}
+                className="font-mono-data text-xs"
+                autoComplete="off"
+                spellCheck={false}
+              />
+              <Button
+                size="sm"
+                variant="ghost"
+                type="button"
+                onClick={() => setReveal((r) => !r)}
+                className="h-9"
+              >
+                {reveal ? "Hide" : "Show"}
+              </Button>
+            </div>
+          </Field>
+          <div className="grid gap-2 sm:grid-cols-2">
+            <Field label="Store description column">
+              <Input
+                value={ai.descriptionColumn}
+                onChange={(e) => set("descriptionColumn", e.target.value)}
+                placeholder="store_description"
+                className="font-mono-data text-xs"
+              />
+            </Field>
+            <Field label="Fallback phrase">
+              <Input
+                value={ai.fallback}
+                onChange={(e) => set("fallback", e.target.value)}
+                placeholder="your unique collection"
+                className="font-mono-data text-xs"
+              />
+            </Field>
+          </div>
+          <Field label="AI Generation Prompt Blueprint">
+            <Textarea
+              value={ai.prompt}
+              onChange={(e) => set("prompt", e.target.value)}
+              rows={4}
+              className="font-mono-data text-[12px] leading-relaxed"
+              placeholder="Write a brief 7-word phrase about a category they specialize in…"
+            />
+          </Field>
+          <p className="font-mono-data text-[10px] text-muted-foreground">
+            Insert <span className="text-sky-glow">{"{ai_insight}"}</span> anywhere in a Subject or Body template.
+            When the active row exposes <span className="text-sky-glow">{ai.descriptionColumn}</span>, a custom
+            sentence is fetched in the background and injected. Missing data → fallback phrase.
+          </p>
+        </div>
+      )}
+    </section>
   );
 }
