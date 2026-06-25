@@ -843,6 +843,7 @@ function Index() {
           onAdd={addTemplate}
           onDelete={deleteTemplate}
         />
+        <AIPersonalizationPanel ai={ai} onChange={setAi} />
         <IngestPanel
           parsing={parsing}
           progress={parseProgress}
@@ -874,6 +875,7 @@ function Index() {
             rotation={rotation}
             resumeTarget={resumeTarget}
             onConsumeResume={() => setResumeTarget(null)}
+            ai={ai}
           />
         </div>
         </DragContext.Provider>
