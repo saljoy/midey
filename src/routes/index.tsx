@@ -95,6 +95,74 @@ const DEFAULT_STATE: PersistedState = {
 
 const AUTOSAVE_KEY = "midey.outreach.autosave.v1";
 const SESSION_META_KEY = "midey.outreach.session.v1";
+const AI_SETTINGS_KEY = "midey.outreach.ai.v1";
+
+export interface AISettings {
+  enabled: boolean;
+  provider: "gemini" | "openai";
+  apiKey: string;
+  prompt: string;
+  fallback: string;
+  descriptionColumn: string;
+}
+
+const DEFAULT_AI: AISettings = {
+  enabled: false,
+  provider: "gemini",
+  apiKey: "",
+  prompt:
+    "Analyze the following store description and write a single, natural, brief 7-word phrase complimenting a specific product category they specialize in. Do not use corporate jargon or exclamation marks.",
+  fallback: "your unique collection",
+  descriptionColumn: "store_description",
+};
+
+function loadAISettings(): AISettings {
+  if (typeof window === "undefined") return DEFAULT_AI;
+  try {
+    const raw = localStorage.getItem(AI_SETTINGS_KEY);
+    if (!raw) return DEFAULT_AI;
+    return { ...DEFAULT_AI, ...JSON.parse(raw) };
+  } catch { return DEFAULT_AI; }
+}
+
+async function generateAIInsight(
+  ai: AISettings,
+  description: string,
+  signal?: AbortSignal,
+): Promise<string> {
+  const fullPrompt = `${ai.prompt}\n\nStore description:\n"""${description}"""`;
+  if (ai.provider === "gemini") {
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${encodeURIComponent(ai.apiKey)}`;
+    const res = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ contents: [{ parts: [{ text: fullPrompt }] }] }),
+      signal,
+    });
+    if (!res.ok) throw new Error(`Gemini ${res.status}`);
+    const j = await res.json();
+    const txt = j?.candidates?.[0]?.content?.parts?.[0]?.text;
+    return String(txt || "").trim().replace(/^["'`]+|["'`]+$/g, "");
+  }
+  // OpenAI
+  const res = await fetch("https://api.openai.com/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${ai.apiKey}`,
+    },
+    body: JSON.stringify({
+      model: "gpt-4o-mini",
+      messages: [{ role: "user", content: fullPrompt }],
+      temperature: 0.7,
+    }),
+    signal,
+  });
+  if (!res.ok) throw new Error(`OpenAI ${res.status}`);
+  const j = await res.json();
+  const txt = j?.choices?.[0]?.message?.content;
+  return String(txt || "").trim().replace(/^["'`]+|["'`]+$/g, "");
+}
 
 function newId() {
   return `tpl_${Math.random().toString(36).slice(2, 9)}`;
