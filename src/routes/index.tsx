@@ -1713,6 +1713,7 @@ function SectionACard({
               }
             }}
             isResend={state.rowStates[nextPendingIndex] === "processed"}
+            ai={ai}
           />
         )}
       </div>
@@ -1721,7 +1722,7 @@ function SectionACard({
 }
 
 function NextRowPreview({
-  rowIndex, row, targetEmailHeader, subjectTpl, bodyTpl, htmlMode, htmlTpl, onSend, onSkip, isResend,
+  rowIndex, row, targetEmailHeader, subjectTpl, bodyTpl, htmlMode, htmlTpl, onSend, onSkip, isResend, ai,
 }: {
   rowIndex: number;
   row: Row | undefined;
@@ -1733,12 +1734,43 @@ function NextRowPreview({
   onSend: () => void;
   onSkip: () => void;
   isResend?: boolean;
+  ai: AISettings;
 }) {
+  // ---- AI {ai_insight} resolver: fetch when active row exposes a description ----
+  const description = ((row?.[ai.descriptionColumn] ?? "") as string).trim();
+  const usesAi =
+    /\{ai_insight\}/.test(subjectTpl) ||
+    /\{ai_insight\}/.test(bodyTpl) ||
+    /\{ai_insight\}/.test(htmlTpl);
+  const [aiInsight, setAiInsight] = useState<string>("");
+  const [aiLoading, setAiLoading] = useState(false);
+  useEffect(() => {
+    if (!usesAi) { setAiInsight(""); setAiLoading(false); return; }
+    if (!ai.enabled || !ai.apiKey || !description) {
+      setAiInsight(ai.fallback);
+      setAiLoading(false);
+      return;
+    }
+    const ctrl = new AbortController();
+    setAiLoading(true);
+    setAiInsight("");
+    generateAIInsight(ai, description, ctrl.signal)
+      .then((txt) => setAiInsight(txt || ai.fallback))
+      .catch(() => setAiInsight(ai.fallback))
+      .finally(() => setAiLoading(false));
+    return () => ctrl.abort();
+  }, [rowIndex, description, usesAi, ai.enabled, ai.apiKey, ai.provider, ai.prompt, ai.fallback]);
+
+  const extras = useMemo(
+    () => ({ ai_insight: aiLoading ? "…" : (aiInsight || ai.fallback) }),
+    [aiInsight, aiLoading, ai.fallback],
+  );
+
   const rawRecipients = row?.[targetEmailHeader] ?? "";
   const toAddr = cleanEmails(rawRecipients);
-  const subject = renderTemplate(subjectTpl, row);
-  const body = renderTemplate(bodyTpl, row);
-  const renderedHtml = autoFormatHtml(renderTemplate(htmlTpl, row));
+  const subject = renderTemplate(subjectTpl, row, extras);
+  const body = renderTemplate(bodyTpl, row, extras);
+  const renderedHtml = autoFormatHtml(renderTemplate(htmlTpl, row, extras));
   const plainHref = toAddr
     ? buildMailto(rawRecipients, { subject, body })
     : "";
