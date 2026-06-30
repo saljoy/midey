@@ -1273,8 +1273,17 @@ function SectionACard({
     (i) => (state.rowStates[i] ?? "pending") === "pending",
   );
   // Manual override — "Jump to row" input or "Resend" button on a processed row.
+  // This is a ONE-OFF: it points at exactly one row, and gets cleared again
+  // after that single send/skip, returning to normal queue order.
   const [activeOverride, setActiveOverride] = useState<number | null>(null);
   const [jumpInput, setJumpInput] = useState<string>("");
+  // "Start from row #" — unlike activeOverride, this is STICKY: once set,
+  // every subsequent "next pending" lookup is restricted to rows at or
+  // after this index, so sending continues forward from here instead of
+  // snapping back to the lowest-index pending row. Stays active until the
+  // user explicitly clears it (or every row from here on is processed).
+  const [queueStartFrom, setQueueStartFrom] = useState<number | null>(null);
+  const [startFromInput, setStartFromInput] = useState<string>("");
   // Apply external "Restore previous session" jump
   useEffect(() => {
     if (resumeTarget !== null) {
@@ -1283,10 +1292,19 @@ function SectionACard({
       onConsumeResume();
     }
   }, [resumeTarget, onConsumeResume]);
+  const firstPendingFromStart = useMemo(() => {
+    if (queueStartFrom === null) return undefined;
+    for (let i = queueStartFrom; i < state.rows.length; i++) {
+      if ((state.rowStates[i] ?? "pending") === "pending") return i;
+    }
+    return undefined; // everything from the start point onward is done
+  }, [queueStartFrom, state.rows.length, state.rowStates]);
   const nextPendingIndex =
     activeOverride !== null && state.rows[activeOverride]
       ? activeOverride
-      : firstPendingIndex;
+      : queueStartFrom !== null
+        ? firstPendingFromStart
+        : firstPendingIndex;
   const pendingCount = state.rows.length - processedCount;
   const [filter, setFilter] = useState<"all" | "active" | "processed">("all");
   const htmlTextareaRef = useRef<HTMLTextAreaElement>(null);
@@ -1625,6 +1643,40 @@ function SectionACard({
             </button>
           )}
         </div>
+        <div className="flex items-center gap-1.5">
+          <label className="font-mono-data text-[10px] uppercase tracking-wider text-muted-foreground">
+            Start from row #
+          </label>
+          <Input
+            type="number"
+            min={0}
+            max={Math.max(0, state.rows.length - 1)}
+            value={startFromInput}
+            onChange={(e) => {
+              const v = e.target.value;
+              setStartFromInput(v);
+              if (v === "") { setQueueStartFrom(null); return; }
+              const n = Number(v);
+              if (Number.isFinite(n) && n >= 0 && n < state.rows.length) {
+                setQueueStartFrom(n);
+              }
+            }}
+            className="h-8 w-20 font-mono-data text-xs"
+            placeholder="0"
+            disabled={state.rows.length === 0}
+            title="Unlike Jump to row, this keeps the queue moving forward from here on every send."
+          />
+          {queueStartFrom !== null && (
+            <button
+              type="button"
+              onClick={() => { setQueueStartFrom(null); setStartFromInput(""); }}
+              className="rounded-md border border-sky-glow/40 bg-sky-glow/10 px-2 py-1 font-mono-data text-[10px] text-sky-glow hover:text-foreground"
+              title="Clear starting point · resume normal queue"
+            >
+              <RotateCcw className="inline size-3" /> from #{queueStartFrom}
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Active queue email search */}
@@ -1743,7 +1795,9 @@ function SectionACard({
           )
         ) : nextPendingIndex === undefined ? (
           <p className="py-6 text-center font-mono-data text-xs text-muted-foreground">
-            All rows processed.
+            {queueStartFrom !== null
+              ? `All rows from #${queueStartFrom} onward are processed.`
+              : "All rows processed."}
           </p>
         ) : (
           <NextRowPreview
