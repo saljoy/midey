@@ -2,7 +2,6 @@ import { createFileRoute } from "@tanstack/react-router";
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import Papa from "papaparse";
 import * as XLSX from "xlsx";
-// react-window removed — queue is no longer displayed as a scrolling list.
 import { toast } from "sonner";
 import {
   Upload, Sun, Moon, Trash2, Send, Mail, Code2, Copy,
@@ -10,6 +9,9 @@ import {
   Bold, Italic, Underline, Strikethrough, List, ListOrdered,
   AlignLeft, AlignCenter, AlignRight, AlignJustify, Link2, Minus,
   Palette, Highlighter, CornerDownLeft, RotateCcw,
+  Menu, X, Settings, Key, CheckCircle, XCircle, AlertCircle,
+  Globe, Beaker, ChevronRight, Search, BookOpen, PenLine,
+  Sparkles, RefreshCw, Clipboard,
 } from "lucide-react";
 import { Plus, ChevronDown, ChevronUp, Shuffle, Activity, ShieldAlert, History, Layers } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -24,19 +26,20 @@ import {
 export const Route = createFileRoute("/")({
   head: () => ({
     meta: [
-      { title: "Wayne Enterprises Outreach Lab" },
-      { name: "description", content: "High-performance mobile outreach console: parse 50MB+ CSV lead lists, fire personalized mailto handoffs, and craft rich HTML drafts — all 100% client-side." },
-      { property: "og:title", content: "Wayne Enterprises Outreach Lab" },
-      { property: "og:description", content: "Client-side outreach dashboard for rapid, templated email handoffs from massive CSV lead lists." },
+      { title: "Midey Enterprises Outreach Lab" },
+      { name: "description", content: "High-performance mobile outreach console: parse CSV lead lists, fire personalized mailto handoffs, and craft rich HTML drafts — all 100% client-side." },
     ],
   }),
   component: Index,
-});
+}));
 
-/* ----------------------------- Types ----------------------------- */
+/* ============================================================
+   TYPES
+   ============================================================ */
 
 type Row = Record<string, string>;
 type RowState = "pending" | "processed" | "skipped";
+type HomepageMode = "research" | "queue";
 
 export interface TemplateItem {
   id: string;
@@ -46,11 +49,20 @@ export interface TemplateItem {
   html: string;
 }
 
+export interface ApiKey {
+  id: string;
+  label: string;
+  value: string;
+  enabled: boolean;
+  status: "unknown" | "active" | "quota" | "invalid" | "testing";
+}
+
 interface PersistedState {
   headers: string[];
   rows: Row[];
   rowStates: Record<number, RowState>;
   targetEmailHeader: string;
+  domainHeader: string;
   subjectA: string;
   bodyA: string;
   recipientB: string;
@@ -67,22 +79,129 @@ interface PersistedState {
   dailyGoal: number;
   queueSearchPersisted: string;
   trackingEnabled: boolean;
+  homepageMode: HomepageMode;
 }
+
+/* ============================================================
+   STORAGE KEYS
+   ============================================================ */
 
 const STORAGE_KEY = "midey.outreach.v1";
 const THEME_KEY = "midey.theme";
+const AUTOSAVE_KEY = "midey.outreach.autosave.v1";
+const SESSION_META_KEY = "midey.outreach.session.v1";
+const API_KEYS_KEY = "midey.gemini.keys.v1";
+const PROMPTS_KEY = "midey.prompts.v1";
+
+/* ============================================================
+   DEFAULT PROMPTS
+   ============================================================ */
+
+const DEFAULT_RESEARCH_PROMPT = `I'm going to give you a Shopify store name or link. I want you to research this store and its ownership using web search, and give me a clear, organized brief that helps me understand the business and the person behind it before I reach out to them.
+
+Please do the following:
+
+Step 1: Identify the key person
+Find the founder, owner, or someone with strong administrative or decision making power in the business (CEO, founder, head of operations, etc). Prioritize whoever appears to be the main decision maker.
+
+Step 2: Find contact details
+Search for their business email or any publicly available contact information (this could be on the store's About or Contact page, LinkedIn, press articles, podcast features, interviews, or business directories).
+
+Important: my goal is to reach the actual decision maker, not a generic inbox. Do not settle for or default to generic addresses like info@, support@, hello@, sales@, or a general contact form, even if those are the easiest to find. Only list a generic address as a last resort, and clearly flag it as generic rather than direct, so I know not to rely on it.
+
+If you find a direct email tied to the founder or decision maker, list it. If you can only find a likely email format (e.g. firstname@storedomain.com) based on common patterns, mention that it's inferred, not confirmed. Never guess private or personal information that isn't publicly available.
+
+Step 3: Research the person and the store
+Search for recent, relevant, and noteworthy information including:
+- Their name, role, and background (how they started the business, past experience, education, or other ventures if available)
+- Any recent news, launches, milestones, press features, or social media activity from the store or the founder
+- Their personality, values, or tone, if it can be picked up from interviews, social posts, or public statements
+- Anything unique or specific about the brand, products, mission, or growth stage
+- Any pain points or signals that hint at what they might be struggling with (e.g. rapid growth, lots of apps installed, recent funding, complaints, hiring activity, etc)
+
+Step 4: Summarize it clearly
+Give me a short, well organized brief (not overly long) under these sections:
+- Who they are
+- What I found about the business
+- Recent or noteworthy updates
+- Anything useful for understanding their personality or current priorities
+- Contact info found (with a note on confidence level: confirmed direct, inferred direct, or generic fallback)
+
+Use your search tool actively throughout this process rather than relying on existing knowledge, since I need current, accurate, and verifiable information.`;
+
+const DEFAULT_EMAIL_PROMPT = `I'm going to give you details about a Shopify store, its founder/owner, and/or recent news about them. Use this to write a short, highly personalized cold outreach message from Ayomide (also known as Midey) at Phoenix Agency, rooted in these core themes (don't use them all as rigid sections, weave them naturally based on what fits the specific lead):
+
+1. Empathy and recognition — Acknowledge the real overwhelm of running a Shopify store (juggling apps, costs, customer queries, day to day operations). Validate that they're likely overworked and stretched thin.
+
+2. Cost reduction, no new expense — Make clear we're not pitching another subscription or tool to add to their stack. Reference the hidden costs of redundant apps, subscriptions, or manual work that could be eliminated.
+
+3. Automation and simplification — Frame the solution as consolidating and automating what's currently manual and repetitive, ideally something built once rather than another recurring cost.
+
+4. Freedom and time recovery — Tie this back to giving them time back for the things that actually matter: product creation, growth, or simply their life outside the business. Introduce the idea of the "Chaos Tax", the hidden cost of disorganization and inefficiency, where relevant.
+
+5. Low pressure, no obligation — Make it clear there's zero commitment. We're not pitching upfront, just sharing something we noticed and offering to show them, nothing more.
+
+6. Personalization and credibility — Use their name and store name, and reference something specific about their store (recent news, product line, design, founder background, etc.) that proves we actually looked at their business before reaching out.
+
+Voice and framing requirement:
+Write from "we" (Phoenix Agency), never "I". The message should stay centered on the recipient and their store, not on us or our agency. Keep any mention of Phoenix Agency brief and only where it adds credibility, never as the focus of a sentence. When transitioning into explaining the solution, use a short phrase like "what we do at Phoenix is help merchants like you..." or a natural variation of it, to establish agency prowess before going into specifics. Outside of that one transition phrase, the message should read like it's about them and what we noticed about their store, not about what we do or who we are.
+
+Infrastructure paragraph requirement:
+After the personalized opening, include one detailed paragraph explaining how the solution actually works, written specifically around what was found in the store's details. This paragraph must clearly communicate, in this order, but in natural flowing language and not as a list:
+- We do not hand over a system for them to manage. We build the automation directly into their store.
+- It is built using Shopify's own free native tools, such as Shopify Flow and other built in features that match what their specific store needs.
+- Once it is built and set up, it runs entirely on its own and does not require our input or anyone else's to keep working.
+- Because it runs on native Shopify tools, most of the external apps and subscriptions currently in use can be removed, since those functions can now be handled for free natively.
+- Because everything runs directly from Shopify itself, the store stays fast, stable, and efficient.
+
+Tone and language requirements:
+- The message must feel highly human, like it was genuinely typed by a real person who cares, not AI generated or templated.
+- Do not use hyphens or em dashes anywhere in the message.
+- Keep it formal enough to be taken seriously by a business owner, but the English must be simple and easy to understand.
+- Conversational tone, not salesy, not robotic, no generic compliments.
+- Because of the added infrastructure paragraph, the message can run longer than a typical cold email, but should stay under 220 words total and still feel tight and purposeful, not bloated or repetitive.
+- End with ONE clear, low friction CTA: asking if they would like us to send over a 60 second video walking through what we found and how this could work for their store. Frame it as a casual reply (yes or no), not a meeting or call.
+- Sign off with "Ayo Midey / Growth Specialist | Phoenix Agency / Helping E-commerce Brands & Authors Scale"
+
+Workflow:
+Step 2: Once I paste the details, do not write the message yet. Instead, analyze the details and give me 4 different possible approaches I could open the message with. Return ONLY a valid JSON array with no other text, no markdown, no backticks. Each object must have exactly these fields:
+- "number": integer 1 to 4
+- "title": short angle name (3 to 6 words)
+- "why": exactly 2 sentences explaining why this angle fits THIS specific lead based on the research brief, referencing a specific detail found
+- "bestFor": one line describing what type of founder this approach works best on
+- "tone": exactly two words (e.g. "Empathetic, practical")
+- "hook": the actual opening sentence or very close to it, so the tone is felt before committing`;
+
+const DEFAULT_HTML_PROMPT = `Convert the following cold email into clean, professional HTML that renders well in Gmail and other email clients. Use a table-based layout for maximum email client compatibility.
+
+Requirements:
+- Use a single centered table, max-width 600px, with a white or very light background
+- Use system-safe fonts: Arial, Helvetica, sans-serif
+- Keep font size 14-16px for body text, slightly larger for any heading if present
+- Maintain all paragraph breaks from the original email
+- Make links clickable with a clear color (use #0ea5e9 for link color)
+- Add subtle padding around the content (20-30px on sides)
+- Keep the signature visually distinct (slightly smaller font, muted color like #6b7280)
+- Do NOT add images, logos, or decorative elements unless they were in the original
+- Do NOT add an unsubscribe footer
+- Return ONLY the complete HTML starting with <!DOCTYPE html>, no explanation, no markdown, no backticks`;
+
+/* ============================================================
+   DEFAULT STATE
+   ============================================================ */
 
 const DEFAULT_STATE: PersistedState = {
   headers: [],
   rows: [],
   rowStates: {},
   targetEmailHeader: "",
+  domainHeader: "",
   subjectA: "Quick question, {first_name}",
-  bodyA: "Hi {first_name},\n\nNoticed {company} — wanted to reach out.\n\n— Wayne",
+  bodyA: "Hi {first_name},\n\nNoticed {company} — wanted to reach out.\n\n— Midey",
   recipientB: "",
   sampleIdB: 0,
   subjectB: "A note for {first_name}",
-  htmlB: "<div style=\"font-family:system-ui;line-height:1.55\">\n  <h2 style=\"color:#0ea5e9\">Hi {first_name} 👋</h2>\n  <p>Loved what you're doing at <b>{company}</b>.</p>\n  <p>— Wayne Enterprises</p>\n</div>",
+  htmlB: "<div style=\"font-family:system-ui;line-height:1.55\">\n  <h2 style=\"color:#0ea5e9\">Hi {first_name} 👋</h2>\n  <p>Loved what you're doing at <b>{company}</b>.</p>\n  <p>— Phoenix Agency</p>\n</div>",
   templateSlotsA: [],
   htmlMode: false,
   templates: [],
@@ -93,84 +212,165 @@ const DEFAULT_STATE: PersistedState = {
   dailyGoal: 100,
   queueSearchPersisted: "",
   trackingEnabled: false,
+  homepageMode: "research",
 };
-
-const AUTOSAVE_KEY = "midey.outreach.autosave.v1";
-const SESSION_META_KEY = "midey.outreach.session.v1";
-const AI_SETTINGS_KEY = "midey.outreach.ai.v1";
-
-export interface AISettings {
-  enabled: boolean;
-  provider: "gemini" | "openai";
-  apiKey: string;
-  prompt: string;
-  fallback: string;
-  descriptionColumn: string;
-}
-
-const DEFAULT_AI: AISettings = {
-  enabled: false,
-  provider: "gemini",
-  apiKey: "",
-  prompt:
-    "Analyze the following store description and write a single, natural, brief 7-word phrase complimenting a specific product category they specialize in. Do not use corporate jargon or exclamation marks.",
-  fallback: "your unique collection",
-  descriptionColumn: "store_description",
-};
-
-function loadAISettings(): AISettings {
-  if (typeof window === "undefined") return DEFAULT_AI;
-  try {
-    const raw = localStorage.getItem(AI_SETTINGS_KEY);
-    if (!raw) return DEFAULT_AI;
-    return { ...DEFAULT_AI, ...JSON.parse(raw) };
-  } catch { return DEFAULT_AI; }
-}
-
-async function generateAIInsight(
-  ai: AISettings,
-  description: string,
-  signal?: AbortSignal,
-): Promise<string> {
-  const fullPrompt = `${ai.prompt}\n\nStore description:\n"""${description}"""`;
-  if (ai.provider === "gemini") {
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${encodeURIComponent(ai.apiKey)}`;
-    const res = await fetch(url, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ contents: [{ parts: [{ text: fullPrompt }] }] }),
-      signal,
-    });
-    if (!res.ok) throw new Error(`Gemini ${res.status}`);
-    const j = await res.json();
-    const txt = j?.candidates?.[0]?.content?.parts?.[0]?.text;
-    return String(txt || "").trim().replace(/^["'`]+|["'`]+$/g, "");
-  }
-  // OpenAI
-  const res = await fetch("https://api.openai.com/v1/chat/completions", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${ai.apiKey}`,
-    },
-    body: JSON.stringify({
-      model: "gpt-4o-mini",
-      messages: [{ role: "user", content: fullPrompt }],
-      temperature: 0.7,
-    }),
-    signal,
-  });
-  if (!res.ok) throw new Error(`OpenAI ${res.status}`);
-  const j = await res.json();
-  const txt = j?.choices?.[0]?.message?.content;
-  return String(txt || "").trim().replace(/^["'`]+|["'`]+$/g, "");
-}
 
 function newId() {
   return `tpl_${Math.random().toString(36).slice(2, 9)}`;
 }
 
-/** Spam keywords / patterns commonly tripping aggressive filters. */
+function loadState(): PersistedState {
+  if (typeof window === "undefined") return DEFAULT_STATE;
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) return DEFAULT_STATE;
+    const parsed = JSON.parse(raw) as Partial<PersistedState>;
+    const merged: PersistedState = { ...DEFAULT_STATE, ...parsed } as PersistedState;
+    if (!merged.templates || merged.templates.length === 0) {
+      const seedId = newId();
+      merged.templates = [{
+        id: seedId,
+        name: "Default",
+        subject: merged.subjectA || DEFAULT_STATE.subjectA,
+        body: merged.bodyA || DEFAULT_STATE.bodyA,
+        html: merged.htmlB || DEFAULT_STATE.htmlB,
+      }];
+      merged.activeTemplateId = seedId;
+    }
+    if (!merged.activeTemplateId || !merged.templates.find((t) => t.id === merged.activeTemplateId)) {
+      merged.activeTemplateId = merged.templates[0].id;
+    }
+    return merged;
+  } catch {
+    return DEFAULT_STATE;
+  }
+}
+
+function loadApiKeys(): ApiKey[] {
+  if (typeof window === "undefined") return [];
+  try {
+    const raw = localStorage.getItem(API_KEYS_KEY);
+    if (!raw) return [];
+    return JSON.parse(raw) as ApiKey[];
+  } catch { return []; }
+}
+
+function saveApiKeys(keys: ApiKey[]) {
+  try { localStorage.setItem(API_KEYS_KEY, JSON.stringify(keys)); } catch {}
+}
+
+function loadPrompts() {
+  if (typeof window === "undefined") {
+    return { research: DEFAULT_RESEARCH_PROMPT, email: DEFAULT_EMAIL_PROMPT, html: DEFAULT_HTML_PROMPT };
+  }
+  try {
+    const raw = localStorage.getItem(PROMPTS_KEY);
+    if (!raw) return { research: DEFAULT_RESEARCH_PROMPT, email: DEFAULT_EMAIL_PROMPT, html: DEFAULT_HTML_PROMPT };
+    const p = JSON.parse(raw);
+    return {
+      research: p.research || DEFAULT_RESEARCH_PROMPT,
+      email: p.email || DEFAULT_EMAIL_PROMPT,
+      html: p.html || DEFAULT_HTML_PROMPT,
+    };
+  } catch {
+    return { research: DEFAULT_RESEARCH_PROMPT, email: DEFAULT_EMAIL_PROMPT, html: DEFAULT_HTML_PROMPT };
+  }
+}
+
+/* ============================================================
+   GEMINI API UTILITIES
+   ============================================================ */
+
+const GEMINI_BASE = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent";
+
+async function callGemini(
+  keys: ApiKey[],
+  setKeys: (updater: (prev: ApiKey[]) => ApiKey[]) => void,
+  activeKeyIdxRef: React.MutableRefObject<number>,
+  prompt: string,
+  useWebSearch = false,
+): Promise<string> {
+  const enabledKeys = keys.filter((k) => k.enabled && k.value.trim());
+  if (enabledKeys.length === 0) throw new Error("No active API keys. Add and enable at least one Gemini key in Settings.");
+
+  // Start from the current active index within the enabled pool
+  let attempts = 0;
+  while (attempts < enabledKeys.length) {
+    const idx = activeKeyIdxRef.current % enabledKeys.length;
+    const key = enabledKeys[idx];
+
+    const body: Record<string, unknown> = {
+      contents: [{ parts: [{ text: prompt }] }],
+      generationConfig: { temperature: 0.8 },
+    };
+    if (useWebSearch) {
+      body.tools = [{ googleSearch: {} }];
+    }
+
+    try {
+      const res = await fetch(`${GEMINI_BASE}?key=${encodeURIComponent(key.value)}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+
+      if (res.status === 429 || res.status === 503) {
+        // Quota exhausted — mark this key and rotate to next
+        setKeys((prev) => prev.map((k) => k.id === key.id ? { ...k, status: "quota" } : k));
+        activeKeyIdxRef.current = (activeKeyIdxRef.current + 1) % enabledKeys.length;
+        attempts++;
+        continue;
+      }
+
+      if (res.status === 400 || res.status === 403) {
+        setKeys((prev) => prev.map((k) => k.id === key.id ? { ...k, status: "invalid" } : k));
+        activeKeyIdxRef.current = (activeKeyIdxRef.current + 1) % enabledKeys.length;
+        attempts++;
+        continue;
+      }
+
+      if (!res.ok) {
+        throw new Error(`Gemini error ${res.status}`);
+      }
+
+      const j = await res.json();
+      const txt = j?.candidates?.[0]?.content?.parts?.[0]?.text;
+      if (!txt) throw new Error("Empty response from Gemini");
+
+      // Mark this key as active/healthy
+      setKeys((prev) => prev.map((k) => k.id === key.id ? { ...k, status: "active" } : k));
+      return String(txt).trim();
+
+    } catch (err) {
+      if ((err as Error).message.includes("Gemini error") || (err as Error).message.includes("Empty response")) {
+        throw err;
+      }
+      attempts++;
+    }
+  }
+  throw new Error("All API keys are exhausted or invalid. Please add more keys or wait for quota reset.");
+}
+
+async function testGeminiKey(apiKey: string): Promise<"active" | "quota" | "invalid"> {
+  try {
+    const res = await fetch(`${GEMINI_BASE}?key=${encodeURIComponent(apiKey)}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ contents: [{ parts: [{ text: "Reply with the single word: ok" }] }] }),
+    });
+    if (res.status === 429 || res.status === 503) return "quota";
+    if (res.status === 400 || res.status === 403) return "invalid";
+    if (!res.ok) return "invalid";
+    return "active";
+  } catch {
+    return "invalid";
+  }
+}
+
+/* ============================================================
+   SPAM / LINK SCAN UTILITIES
+   ============================================================ */
+
 const SPAM_TERMS = [
   "free", "guarantee", "guaranteed", "urgent", "act now", "risk-free", "risk free",
   "winner", "cash", "click here", "buy now", "100%", "limited time", "no cost",
@@ -188,7 +388,6 @@ function scanSpam(text: string): { hits: string[]; exclaim: number; allCaps: num
   const allCaps = words.filter((w) => /^[A-Z]{4,}$/.test(w)).length;
   return { hits, exclaim, allCaps };
 }
-/** Validate hyperlinks inside an HTML template. */
 function scanLinks(html: string): { ok: number; broken: { tag: string; reason: string }[] } {
   const out: { tag: string; reason: string }[] = [];
   let ok = 0;
@@ -205,26 +404,18 @@ function scanLinks(html: string): { ok: number; broken: { tag: string; reason: s
     }
     ok++;
   }
-  // Unbalanced anchor tags
   const opens = (html.match(/<a\b/gi) || []).length;
   const closes = (html.match(/<\/a>/gi) || []).length;
   if (opens !== closes) out.push({ tag: `${opens} open vs ${closes} close`, reason: "unbalanced <a> tags" });
   return { ok, broken: out };
 }
 
-/* --------------------------- Utilities --------------------------- */
+/* ============================================================
+   TEMPLATE / RENDER UTILITIES
+   ============================================================ */
 
 const TOKEN_RE = /\{([^{}]+)\}/g;
 
-/**
- * Expand Spintax — {a|b|c} — picking ONE variant per occurrence based on
- * `seed` (the global send counter) instead of random chance, so the Nth
- * email sent always gets the Nth option from every bracket (looping back
- * to the start once a bracket runs out of options). This makes spintax
- * output deterministic and repeatable across a session: send #0 gets
- * option 1 from every bracket, send #1 gets option 2, etc.
- * Iterates innermost-first so nested groups like {Hi|{Hello|Hey}} work.
- */
 function expandSpintax(src: string, seed: number): string {
   if (!src || src.indexOf("{") === -1) return src;
   const inner = /\{([^{}]*\|[^{}]*)\}/;
@@ -256,90 +447,20 @@ function renderTemplate(
   });
 }
 
-/**
- * Normalize an email cell that may contain multiple addresses
- * separated by commas or semicolons (with stray whitespace).
- * Returns a comma-joined, space-free string suitable for mailto:.
- */
-function cleanEmails(raw: string): string {
-  return (raw || "")
-    .split(/[,;:\s|]+/)
-    .map((e) => e.trim())
-    .filter(Boolean)
-    .join(",");
-}
-
-/**
- * Build a mailto: URL where ALL recipients are placed as a single
- * comma-separated list in the primary "To:" field (no BCC).
- * Subject and Body are independently passed through encodeURIComponent
- * so spaces, line breaks, and reserved symbols survive the trip into
- * mobile Gmail. Recipient commas are percent-encoded (%2C) per RFC 6068
- * to avoid mobile clients truncating the query string.
- */
-function buildMailto(rawRecipients: string, params: Record<string, string>): string {
-  const to = cleanEmails(rawRecipients).split(",").filter(Boolean).join("%2C");
-  const qs: string[] = [];
-  for (const [k, v] of Object.entries(params)) {
-    if (v === undefined || v === null) continue;
-    const encodedKey = encodeURIComponent(k);
-    const encodedVal = encodeURIComponent(String(v));
-    qs.push(`${encodedKey}=${encodedVal}`);
-  }
-  return `mailto:${to}${qs.length ? `?${qs.join("&")}` : ""}`;
-}
-
-/**
- * Auto-format a raw HTML template so plain newlines in the editor
- * become visible paragraph / line breaks in the rendered output.
- * - Blank-line separated chunks → wrapped in <p>…</p>
- * - Single \n inside a chunk → <br />
- * - Chunks that already start with a block-level tag are left as-is.
- */
-const BLOCK_RE =
-  /^\s*<(?:p|div|h[1-6]|ul|ol|li|table|thead|tbody|tr|td|th|blockquote|pre|hr|section|article|header|footer|nav|figure|figcaption|img|iframe|br)\b/i;
-
-/**
- * Detects whether `src` is already a complete/structural HTML document or
- * snippet (e.g. pasted from an email builder, ESP export, or another tool)
- * rather than plain prose typed into the box. Pasted HTML is almost always
- * table-based for email-client compatibility and/or carries a doctype,
- * <html>/<head>/<body>, a <style> block, or HTML comments — none of which
- * appear in the simple prose + toolbar-inserted tags (<b>, <i>, <a>, <div>,
- * <ul>, <hr>, <br>, <span style>) that autoFormatHtml is meant to handle.
- */
 function looksLikeHtmlDocument(src: string): boolean {
   return /<!doctype|<html[\s>]|<head[\s>]|<body[\s>]|<table[\s>]|<thead[\s>]|<tbody[\s>]|<tr[\s>]|<style[\s>]|<!--/i.test(src);
 }
 
-/**
- * Appends an invisible 1x1 tracking pixel to a rendered HTML email body,
- * pointed at this site's own /api/track endpoint with a unique id for the
- * lead being sent to. Only meaningful for real HTML-mode sends — plain
- * mailto: links can't carry an <img> tag, so plain-text sends are never
- * tracked. Safe to call with an empty id (no-ops).
- */
-function withTrackingPixel(html: string, trackId: string): string {
-  if (typeof window === "undefined" || !trackId) return html;
-  const src = `${window.location.origin}/api/track?id=${encodeURIComponent(trackId)}`;
-  return `${html}<img src="${src}" width="1" height="1" alt="" style="display:none!important;width:1px!important;height:1px!important;border:0" />`;
-}
-
 function autoFormatHtml(src: string): string {
   if (!src) return src;
-  // Pasted, already-structural HTML must pass through untouched — splitting
-  // it on blank lines and auto-wrapping/auto-<br>-ing chunks corrupts table
-  // layouts and <style> blocks (e.g. breaking "margin:0" resets, which is
-  // exactly what causes stray blank space at the top of a rendered email).
   if (looksLikeHtmlDocument(src)) return src;
+  const BLOCK_RE = /^<(div|p|ul|ol|li|h[1-6]|blockquote|pre|section|article|header|footer|nav|aside|figure|table|thead|tbody|tr|td|th|hr|br)\b/i;
   const chunks = src.split(/\n{2,}/);
   return chunks
     .map((chunk) => {
       const trimmed = chunk.trim();
       if (!trimmed) return "";
       if (BLOCK_RE.test(trimmed)) {
-        // Already starts with a block tag — preserve, but still convert
-        // bare single newlines inside to <br /> so layout matches editor.
         return trimmed.replace(/\n/g, "<br />");
       }
       return `<p>${trimmed.replace(/\n/g, "<br />")}</p>`;
@@ -348,35 +469,38 @@ function autoFormatHtml(src: string): string {
     .join("\n");
 }
 
-function loadState(): PersistedState {
-  if (typeof window === "undefined") return DEFAULT_STATE;
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return DEFAULT_STATE;
-    const parsed = JSON.parse(raw) as Partial<PersistedState>;
-    const merged: PersistedState = { ...DEFAULT_STATE, ...parsed } as PersistedState;
-    // Migration: ensure at least one template exists, seeded from legacy fields
-    if (!merged.templates || merged.templates.length === 0) {
-      const seedId = newId();
-      merged.templates = [{
-        id: seedId,
-        name: "Default",
-        subject: merged.subjectA || DEFAULT_STATE.subjectA,
-        body: merged.bodyA || DEFAULT_STATE.bodyA,
-        html: merged.htmlB || DEFAULT_STATE.htmlB,
-      }];
-      merged.activeTemplateId = seedId;
-    }
-    if (!merged.activeTemplateId || !merged.templates.find((t) => t.id === merged.activeTemplateId)) {
-      merged.activeTemplateId = merged.templates[0].id;
-    }
-    return merged;
-  } catch {
-    return DEFAULT_STATE;
-  }
+function withTrackingPixel(html: string, trackId: string): string {
+  if (typeof window === "undefined" || !trackId) return html;
+  const src = `${window.location.origin}/api/track?id=${encodeURIComponent(trackId)}`;
+  return `${html}<img src="${src}" width="1" height="1" alt="" style="display:none!important;width:1px!important;height:1px!important;border:0" />`;
 }
 
-/* --------------------------- Component --------------------------- */
+function cleanEmails(raw: string): string {
+  return raw
+    .split(/[,;\n]+/)
+    .map((e) => e.trim())
+    .filter(Boolean)
+    .join(",");
+}
+
+function buildMailto(to: string, opts: { subject?: string; body?: string; bcc?: string } = {}): string {
+  const params = new URLSearchParams();
+  if (opts.subject) params.set("subject", opts.subject);
+  if (opts.body) params.set("body", opts.body);
+  if (opts.bcc) params.set("bcc", opts.bcc);
+  const q = params.toString();
+  return `mailto:${encodeURIComponent(to)}${q ? `?${q}` : ""}`;
+}
+
+function fmtDuration(s: number): string {
+  if (s < 60) return `${s}s`;
+  if (s < 3600) return `${Math.floor(s / 60)}m ${s % 60}s`;
+  return `${Math.floor(s / 3600)}h ${Math.floor((s % 3600) / 60)}m`;
+}
+
+/* ============================================================
+   INDEX COMPONENT
+   ============================================================ */
 
 function Index() {
   const [hydrated, setHydrated] = useState(false);
@@ -384,15 +508,20 @@ function Index() {
   const [theme, setTheme] = useState<"dark" | "light">("dark");
   const [parsing, setParsing] = useState(false);
   const [parseProgress, setParseProgress] = useState(0);
+  const [drawerOpen, setDrawerOpen] = useState(false);
 
-  // AI settings (persisted independently so the API key never leaves localStorage)
-  const [ai, setAi] = useState<AISettings>(DEFAULT_AI);
-  useEffect(() => {
-    if (!hydrated) return;
-    try { localStorage.setItem(AI_SETTINGS_KEY, JSON.stringify(ai)); } catch {}
-  }, [ai, hydrated]);
+  // API key pool
+  const [apiKeys, setApiKeys] = useState<ApiKey[]>([]);
+  const activeKeyIdxRef = useRef(0);
 
-  // ---- Draggable "Send current" button state ----
+  // Prompts
+  const [prompts, setPrompts] = useState({
+    research: DEFAULT_RESEARCH_PROMPT,
+    email: DEFAULT_EMAIL_PROMPT,
+    html: DEFAULT_HTML_PROMPT,
+  });
+
+  // Draggable send button
   const [dragUnlocked, setDragUnlocked] = useState(false);
   const [dragPos, setDragPos] = useState<{ x: number; y: number } | null>(() => {
     if (typeof window === "undefined") return null;
@@ -404,24 +533,14 @@ function Index() {
     } catch {}
     return null;
   });
-  useEffect(() => {
-    if (!hydrated) return;
-    try {
-      if (dragPos) localStorage.setItem("midey:sendBtnPos", JSON.stringify(dragPos));
-      else localStorage.removeItem("midey:sendBtnPos");
-    } catch {}
-  }, [dragPos, hydrated]);
+
   const lastTapRef = useRef(0);
   const tapTimerRef = useRef<number | null>(null);
   const onHeaderTap = useCallback(() => {
     const now = Date.now();
     const elapsed = now - lastTapRef.current;
     if (elapsed < 350 && lastTapRef.current !== 0) {
-      // double-tap
-      if (tapTimerRef.current) {
-        window.clearTimeout(tapTimerRef.current);
-        tapTimerRef.current = null;
-      }
+      if (tapTimerRef.current) { window.clearTimeout(tapTimerRef.current); tapTimerRef.current = null; }
       lastTapRef.current = 0;
       setDragUnlocked(true);
       toast.info("Send button unlocked — drag it anywhere");
@@ -431,27 +550,25 @@ function Index() {
       tapTimerRef.current = window.setTimeout(() => {
         tapTimerRef.current = null;
         lastTapRef.current = 0;
-        // single tap
         setDragUnlocked((cur) => {
-          if (cur) {
-            toast.success("Send button locked in place");
-            return false;
-          }
+          if (cur) { toast.success("Send button locked in place"); return false; }
           return cur;
         });
       }, 360);
     }
   }, []);
 
+  // Hydration
   useEffect(() => {
     setState(loadState());
     const t = (localStorage.getItem(THEME_KEY) as "dark" | "light" | null) ?? "dark";
     setTheme(t);
-    setAi(loadAISettings());
+    setApiKeys(loadApiKeys());
+    setPrompts(loadPrompts());
     setHydrated(true);
   }, []);
 
-  // Persist state (debounced microtask)
+  // Persist state
   useEffect(() => {
     if (!hydrated) return;
     const id = setTimeout(() => {
@@ -460,11 +577,31 @@ function Index() {
     return () => clearTimeout(id);
   }, [state, hydrated]);
 
-  // Apply theme class
+  // Persist API keys
   useEffect(() => {
     if (!hydrated) return;
-    const root = document.documentElement;
-    root.classList.toggle("dark", theme === "dark");
+    saveApiKeys(apiKeys);
+  }, [apiKeys, hydrated]);
+
+  // Persist prompts
+  useEffect(() => {
+    if (!hydrated) return;
+    try { localStorage.setItem(PROMPTS_KEY, JSON.stringify(prompts)); } catch {}
+  }, [prompts, hydrated]);
+
+  // Persist drag pos
+  useEffect(() => {
+    if (!hydrated) return;
+    try {
+      if (dragPos) localStorage.setItem("midey:sendBtnPos", JSON.stringify(dragPos));
+      else localStorage.removeItem("midey:sendBtnPos");
+    } catch {}
+  }, [dragPos, hydrated]);
+
+  // Theme
+  useEffect(() => {
+    if (!hydrated) return;
+    document.documentElement.classList.toggle("dark", theme === "dark");
     localStorage.setItem(THEME_KEY, theme);
   }, [theme, hydrated]);
 
@@ -472,7 +609,7 @@ function Index() {
     setState((s) => ({ ...s, ...p }));
   }, []);
 
-  /* ---------- Templates / rotation helpers ---------- */
+  // Templates
   const activeTemplate: TemplateItem = useMemo(() => {
     const found = state.templates.find((t) => t.id === state.activeTemplateId);
     if (found) return found;
@@ -480,40 +617,22 @@ function Index() {
   }, [state.templates, state.activeTemplateId, state.subjectA, state.bodyA, state.htmlB]);
 
   const updateTemplate = useCallback((id: string, partial: Partial<TemplateItem>) => {
-    setState((s) => ({
-      ...s,
-      templates: s.templates.map((t) => (t.id === id ? { ...t, ...partial } : t)),
-    }));
+    setState((s) => ({ ...s, templates: s.templates.map((t) => (t.id === id ? { ...t, ...partial } : t)) }));
   }, []);
   const addTemplate = useCallback(() => {
     const id = newId();
-    const next: TemplateItem = {
-      id,
-      name: `Template ${state.templates.length + 1}`,
-      subject: activeTemplate.subject,
-      body: activeTemplate.body,
-      html: activeTemplate.html,
-    };
+    const next: TemplateItem = { id, name: `Template ${state.templates.length + 1}`, subject: activeTemplate.subject, body: activeTemplate.body, html: activeTemplate.html };
     setState((s) => ({ ...s, templates: [...s.templates, next], activeTemplateId: id }));
     toast.success(`Added "${next.name}"`);
   }, [state.templates.length, activeTemplate]);
   const deleteTemplate = useCallback((id: string) => {
     setState((s) => {
-      if (s.templates.length <= 1) {
-        toast.error("Keep at least one template");
-        return s;
-      }
+      if (s.templates.length <= 1) { toast.error("Keep at least one template"); return s; }
       const remaining = s.templates.filter((t) => t.id !== id);
-      return {
-        ...s,
-        templates: remaining,
-        activeTemplateId: s.activeTemplateId === id ? remaining[0].id : s.activeTemplateId,
-      };
+      return { ...s, templates: remaining, activeTemplateId: s.activeTemplateId === id ? remaining[0].id : s.activeTemplateId };
     });
   }, []);
 
-  /** Resolve the (subject, body, html) actually used for the NEXT send,
-   *  honoring rotation toggles. */
   const rotation = useMemo(() => {
     const n = state.templates.length || 1;
     const idx = ((state.sendCounter % n) + n) % n;
@@ -527,21 +646,16 @@ function Index() {
     };
   }, [state.templates, state.sendCounter, state.rotateSubjects, state.rotateBodies, activeTemplate]);
 
-  /* ---------- CSV Parse (streaming, off main work via Papa worker) ---------- */
-
+  // CSV parsing
   const onFile = useCallback((file: File) => {
     if (!file) return;
     setParsing(true);
     setParseProgress(0);
     toast.info(`Parsing ${(file.size / 1024 / 1024).toFixed(1)} MB …`);
-
     const isXlsx = /\.xlsx$/i.test(file.name);
     if (isXlsx) {
       const reader = new FileReader();
-      reader.onerror = () => {
-        setParsing(false);
-        toast.error("Failed to read Excel file");
-      };
+      reader.onerror = () => { setParsing(false); toast.error("Failed to read Excel file"); };
       reader.onload = (e) => {
         try {
           const data = new Uint8Array(e.target?.result as ArrayBuffer);
@@ -549,22 +663,13 @@ function Index() {
           const sheetName = wb.SheetNames[0];
           if (!sheetName) throw new Error("Workbook has no sheets");
           const sheet = wb.Sheets[sheetName];
-          const aoa = XLSX.utils.sheet_to_json<unknown[]>(sheet, {
-            header: 1,
-            blankrows: false,
-            defval: "",
-            raw: false,
-          });
+          const aoa = XLSX.utils.sheet_to_json<unknown[]>(sheet, { header: 1, blankrows: false, defval: "", raw: false });
           if (!aoa.length) throw new Error("Sheet is empty");
           const seen = new Set<string>();
           const rawHeaders = (aoa[0] as unknown[]).map((h) => String(h ?? "").trim());
           const headers = rawHeaders.filter((h) => {
-            if (!h) return false;
-            if (h.length > 64) return false;
-            if (/[,\n\r"]/.test(h)) return false;
-            if (seen.has(h)) return false;
-            seen.add(h);
-            return true;
+            if (!h || h.length > 64 || /[,\n\r"]/.test(h) || seen.has(h)) return false;
+            seen.add(h); return true;
           });
           const rows: Row[] = [];
           for (let i = 1; i < aoa.length && rows.length < 500_000; i++) {
@@ -577,99 +682,51 @@ function Index() {
             }
             rows.push(obj);
           }
-          setParsing(false);
-          setParseProgress(100);
+          setParsing(false); setParseProgress(100);
           const guessEmail = headers.find((h) => /e?mail/i.test(h)) ?? headers[0] ?? "";
-          setState((s) => ({
-            ...s,
-            headers,
-            rows,
-            rowStates: {},
-            targetEmailHeader: s.targetEmailHeader || guessEmail,
-          }));
+          const guessDomain = headers.find((h) => /domain/i.test(h)) ?? "";
+          setState((s) => ({ ...s, headers, rows, rowStates: {}, targetEmailHeader: s.targetEmailHeader || guessEmail, domainHeader: s.domainHeader || guessDomain }));
           toast.success(`Loaded ${rows.length.toLocaleString()} rows · ${headers.length} columns`);
-        } catch (err) {
-          setParsing(false);
-          toast.error(`Parse failed: ${(err as Error).message}`);
-        }
+        } catch (err) { setParsing(false); toast.error(`Parse failed: ${(err as Error).message}`); }
       };
-      reader.readAsArrayBuffer(file);
-      return;
+      reader.readAsArrayBuffer(file); return;
     }
-
     const collected: Row[] = [];
     let headers: string[] = [];
     const total = file.size || 1;
-
     Papa.parse<Row>(file, {
-      header: true,
-      skipEmptyLines: true,
-      // NOTE: worker:true + chunk callback is unreliable in some browsers
-      // (cursor never updates → progress stuck at 0%, complete never fires).
-      // Stream on the main thread in 1MB chunks; React state updates
-      // between chunks keep the UI responsive even for 50MB+ files.
-      chunkSize: 1024 * 1024,
+      header: true, skipEmptyLines: true, chunkSize: 1024 * 1024,
       chunk: (results, parser) => {
         if (!headers.length && results.meta.fields) {
-          // Sanitize: only accept clean column-name tokens from row 1.
-          // Reject anything that looks like a data row (commas, newlines,
-          // very long strings, or duplicates) so row data can never
-          // leak into the token blueprint UI.
           const seen = new Set<string>();
-          headers = results.meta.fields
-            .map((h) => (h ?? "").trim())
-            .filter((h) => {
-              if (!h) return false;
-              if (h.length > 64) return false;
-              if (/[,\n\r"]/.test(h)) return false;
-              if (seen.has(h)) return false;
-              seen.add(h);
-              return true;
-            });
+          headers = results.meta.fields.map((h) => (h ?? "").trim()).filter((h) => {
+            if (!h || h.length > 64 || /[,\n\r"]/.test(h) || seen.has(h)) return false;
+            seen.add(h); return true;
+          });
         }
         for (const r of results.data) collected.push(r);
         const cursor = (results.meta as { cursor?: number }).cursor ?? 0;
-        const pct = cursor > 0
-          ? Math.min(99, Math.round((cursor / total) * 100))
-          : Math.min(99, Math.round((collected.length / Math.max(1000, collected.length + 1000)) * 100));
+        const pct = cursor > 0 ? Math.min(99, Math.round((cursor / total) * 100)) : Math.min(99, Math.round((collected.length / Math.max(1000, collected.length + 1000)) * 100));
         setParseProgress(pct);
-        if (collected.length > 500_000) {
-          parser.abort();
-          toast.error("Row cap (500k) reached — truncated.");
-        }
+        if (collected.length > 500_000) { parser.abort(); toast.error("Row cap (500k) reached — truncated."); }
       },
       complete: () => {
-        setParsing(false);
-        setParseProgress(100);
-        const guessEmail =
-          headers.find((h) => /e?mail/i.test(h)) ?? headers[0] ?? "";
-        setState((s) => ({
-          ...s,
-          headers,
-          rows: collected,
-          rowStates: {},
-          targetEmailHeader: s.targetEmailHeader || guessEmail,
-        }));
+        setParsing(false); setParseProgress(100);
+        const guessEmail = headers.find((h) => /e?mail/i.test(h)) ?? headers[0] ?? "";
+        const guessDomain = headers.find((h) => /domain/i.test(h)) ?? "";
+        setState((s) => ({ ...s, headers, rows: collected, rowStates: {}, targetEmailHeader: s.targetEmailHeader || guessEmail, domainHeader: s.domainHeader || guessDomain }));
         toast.success(`Loaded ${collected.length.toLocaleString()} rows · ${headers.length} columns`);
       },
-      error: (err) => {
-        setParsing(false);
-        toast.error(`Parse failed: ${err.message}`);
-      },
+      error: (err) => { setParsing(false); toast.error(`Parse failed: ${err.message}`); },
     });
   }, []);
 
-  /* ---------- Derived: active queue (pending rows, processed sink to bottom) ---------- */
-
+  // Queue
   const queue = useMemo(() => {
-    const pending: number[] = [];
-    const processed: number[] = [];
+    const pending: number[] = [], processed: number[] = [];
     for (let i = 0; i < state.rows.length; i++) {
-      if (state.rowStates[i] === "processed" || state.rowStates[i] === "skipped") {
-        processed.push(i);
-      } else {
-        pending.push(i);
-      }
+      if (state.rowStates[i] === "processed" || state.rowStates[i] === "skipped") processed.push(i);
+      else pending.push(i);
     }
     return [...pending, ...processed];
   }, [state.rows, state.rowStates]);
@@ -679,47 +736,23 @@ function Index() {
     [state.rowStates],
   );
 
-  /* ---------- Row actions ---------- */
-
   const fireRow = useCallback((rowIndex: number) => {
     const row = state.rows[rowIndex];
     if (!row) return;
     const toAddr = (row[state.targetEmailHeader] || "").trim();
-    if (!toAddr) {
-      toast.error(`Row ${rowIndex} missing "${state.targetEmailHeader}"`);
-      return;
-    }
-    setState((s) => ({
-      ...s,
-      rowStates: { ...s.rowStates, [rowIndex]: "processed" },
-      sendCounter: s.sendCounter + 1,
-    }));
+    if (!toAddr) { toast.error(`Row ${rowIndex} missing "${state.targetEmailHeader}"`); return; }
+    setState((s) => ({ ...s, rowStates: { ...s.rowStates, [rowIndex]: "processed" }, sendCounter: s.sendCounter + 1 }));
     sendLogRef.current.push(Date.now());
-  }, [state.rows, state.targetEmailHeader, state.subjectA, state.bodyA]);
+  }, [state.rows, state.targetEmailHeader]);
 
   const skipRow = useCallback((rowIndex: number) => {
     setState((s) => ({ ...s, rowStates: { ...s.rowStates, [rowIndex]: "skipped" } }));
   }, []);
-
   const resetRow = useCallback((rowIndex: number) => {
-    setState((s) => {
-      const next = { ...s.rowStates };
-      delete next[rowIndex];
-      return { ...s, rowStates: next };
-    });
+    setState((s) => { const next = { ...s.rowStates }; delete next[rowIndex]; return { ...s, rowStates: next }; });
   }, []);
 
-  /* ---------- Token copy ---------- */
-
-  /* ---------- Clear all ---------- */
-
-  const clearAll = () => {
-    localStorage.removeItem(STORAGE_KEY);
-    setState(DEFAULT_STATE);
-    toast.success("All data cleared.");
-  };
-
-  /* ---------- Section B: HTML preview + dual action ---------- */
+  const clearAll = () => { localStorage.removeItem(STORAGE_KEY); setState(DEFAULT_STATE); toast.success("All data cleared."); };
 
   const sampleRow = state.rows[state.sampleIdB];
   const renderedHtml = useMemo(
@@ -730,7 +763,6 @@ function Index() {
     () => renderTemplate(activeTemplate.subject, sampleRow, undefined, state.sendCounter),
     [activeTemplate.subject, sampleRow, state.sendCounter],
   );
-
   const executeHtml = useCallback(async () => {
     const recipients = cleanEmails(state.recipientB);
     if (!recipients) { toast.error("Recipient required"); return; }
@@ -738,23 +770,13 @@ function Index() {
       const blobHtml = new Blob([renderedHtml], { type: "text/html" });
       const blobText = new Blob([renderedHtml.replace(/<[^>]+>/g, "")], { type: "text/plain" });
       if ("ClipboardItem" in window && navigator.clipboard?.write) {
-        await navigator.clipboard.write([
-          new ClipboardItem({ "text/html": blobHtml, "text/plain": blobText }),
-        ]);
-      } else {
-        await navigator.clipboard.writeText(renderedHtml);
-      }
+        await navigator.clipboard.write([new ClipboardItem({ "text/html": blobHtml, "text/plain": blobText })]);
+      } else { await navigator.clipboard.writeText(renderedHtml); }
       toast.success("Rich HTML copied — opening mail in 300ms…");
-    } catch (e) {
-      toast.error(`Clipboard failed: ${(e as Error).message}`);
-      return;
-    }
-    setTimeout(() => {
-      window.location.href = buildMailto(state.recipientB, { subject: renderedSubjectB });
-    }, 300);
+    } catch (e) { toast.error(`Clipboard failed: ${(e as Error).message}`); return; }
+    setTimeout(() => { window.location.href = buildMailto(state.recipientB, { subject: renderedSubjectB }); }, 300);
   }, [state.recipientB, renderedHtml, renderedSubjectB]);
 
-  /* Plain-text test sandbox: uses sample row + manual recipient, opens mailto with subject+body. */
   const renderedSubjectAPreview = useMemo(
     () => renderTemplate(activeTemplate.subject, sampleRow, undefined, state.sendCounter),
     [activeTemplate.subject, sampleRow, state.sendCounter],
@@ -768,31 +790,18 @@ function Index() {
     window.location.href = buildMailto(state.recipientB, { subject, body });
   }, [state.recipientB, activeTemplate, sampleRow]);
 
-  /* ---------- Session stats / autosave / resume ---------- */
+  // Session stats
   const sessionStartRef = useRef<number>(Date.now());
   const sendLogRef = useRef<number[]>([]);
   const [, forceTick] = useState(0);
-  useEffect(() => {
-    const id = window.setInterval(() => forceTick((n) => n + 1), 1000);
-    return () => window.clearInterval(id);
-  }, []);
-
-  // 10s autosave heartbeat
+  useEffect(() => { const id = window.setInterval(() => forceTick((n) => n + 1), 1000); return () => window.clearInterval(id); }, []);
   useEffect(() => {
     if (!hydrated) return;
     const id = window.setInterval(() => {
       try {
-        const firstPending = (() => {
-          for (let i = 0; i < state.rows.length; i++) {
-            if (!state.rowStates[i]) return i;
-          }
-          return state.rows.length;
-        })();
+        const firstPending = (() => { for (let i = 0; i < state.rows.length; i++) { if (!state.rowStates[i]) return i; } return state.rows.length; })();
         localStorage.setItem(AUTOSAVE_KEY, JSON.stringify(state));
-        localStorage.setItem(
-          SESSION_META_KEY,
-          JSON.stringify({ ts: Date.now(), lastRow: firstPending, total: state.rows.length }),
-        );
+        localStorage.setItem(SESSION_META_KEY, JSON.stringify({ ts: Date.now(), lastRow: firstPending, total: state.rows.length }));
       } catch {}
     }, 10_000);
     return () => window.clearInterval(id);
@@ -812,12 +821,8 @@ function Index() {
   }, [hydrated]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const [resumeTarget, setResumeTarget] = useState<number | null>(null);
-  const acceptResume = useCallback(() => {
-    if (resume) setResumeTarget(resume.lastRow);
-    setResume(null);
-  }, [resume]);
+  const acceptResume = useCallback(() => { if (resume) setResumeTarget(resume.lastRow); setResume(null); }, [resume]);
 
-  // Velocity (last 30 min)
   const velocity30 = useMemo(() => {
     const cutoff = Date.now() - 30 * 60_000;
     sendLogRef.current = sendLogRef.current.filter((t) => t > cutoff - 1);
@@ -825,7 +830,10 @@ function Index() {
   }, [state.sendCounter]); // eslint-disable-line react-hooks/exhaustive-deps
   const sessionSeconds = Math.floor((Date.now() - sessionStartRef.current) / 1000);
 
-  /* ---------- UI ---------- */
+  // Gemini caller bound to this instance's key pool
+  const geminiCall = useCallback((prompt: string, useWebSearch = false) => {
+    return callGemini(apiKeys, setApiKeys, activeKeyIdxRef, prompt, useWebSearch);
+  }, [apiKeys]);
 
   return (
     <div className="min-h-screen bg-bg-app text-foreground">
@@ -837,45 +845,34 @@ function Index() {
         processedRows={processedCount}
         onHeaderTap={onHeaderTap}
         dragUnlocked={dragUnlocked}
+        homepageMode={state.homepageMode}
+        onToggleMode={(m) => patch({ homepageMode: m })}
+        onOpenDrawer={() => setDrawerOpen(true)}
       />
 
-      <main className="mx-auto max-w-5xl px-3 pb-24 pt-4 sm:px-6">
-        <DragContext.Provider value={{ dragUnlocked, dragPos, setDragPos }}>
-        <SessionStats
-          processedCount={processedCount}
-          totalRows={state.rows.length}
-          dailyGoal={state.dailyGoal}
-          onDailyGoal={(n: number) => patch({ dailyGoal: n })}
-          velocity30={velocity30}
-          sessionSeconds={sessionSeconds}
-        />
-        {resume && (
-          <ResumeBanner
-            lastRow={resume.lastRow}
-            ts={resume.ts}
-            onRestore={acceptResume}
-            onDismiss={() => setResume(null)}
+      {/* Side drawer */}
+      <SideDrawer open={drawerOpen} onClose={() => setDrawerOpen(false)}>
+        <CollapsibleSection title="Session Stats" icon={<Activity className="size-3.5 text-sky-glow" />} defaultOpen>
+          <SessionStats
+            processedCount={processedCount}
+            totalRows={state.rows.length}
+            dailyGoal={state.dailyGoal}
+            onDailyGoal={(n: number) => patch({ dailyGoal: n })}
+            velocity30={velocity30}
+            sessionSeconds={sessionSeconds}
           />
-        )}
-        <TemplateControlPanel
-          templates={state.templates}
-          activeTemplateId={state.activeTemplateId}
-          onSelect={(id: string) => patch({ activeTemplateId: id })}
-          onUpdate={updateTemplate}
-          onAdd={addTemplate}
-          onDelete={deleteTemplate}
-        />
-        <AIPersonalizationPanel ai={ai} onChange={setAi} />
-        <CollapsibleSection
-          title="Lead List"
-          icon={<Upload className="size-3.5 text-sky-glow" />}
-          defaultOpen={state.rows.length === 0}
-          badge={
-            <span className="font-mono-data text-[10px] text-muted-foreground">
-              {state.rows.length.toLocaleString()} rows
-            </span>
-          }
-        >
+        </CollapsibleSection>
+        <CollapsibleSection title="Templates" icon={<Layers className="size-3.5 text-amber-glow" />} defaultOpen={false}>
+          <TemplateControlPanel
+            templates={state.templates}
+            activeTemplateId={state.activeTemplateId}
+            onSelect={(id: string) => patch({ activeTemplateId: id })}
+            onUpdate={updateTemplate}
+            onAdd={addTemplate}
+            onDelete={deleteTemplate}
+          />
+        </CollapsibleSection>
+        <CollapsibleSection title="Lead List / CSV" icon={<Upload className="size-3.5 text-sky-glow" />} defaultOpen={state.rows.length === 0} badge={<span className="font-mono-data text-[10px] text-muted-foreground">{state.rows.length.toLocaleString()} rows</span>}>
           <IngestPanel
             parsing={parsing}
             progress={parseProgress}
@@ -885,54 +882,763 @@ function Index() {
             processedRows={processedCount}
             targetEmailHeader={state.targetEmailHeader}
             onTargetEmailHeader={(v) => patch({ targetEmailHeader: v })}
+            domainHeader={state.domainHeader}
+            onDomainHeader={(v) => patch({ domainHeader: v })}
           />
         </CollapsibleSection>
-        <CollapsibleSection
-          title="Open Tracking"
-          icon={<Activity className="size-3.5 text-amber-glow" />}
-          defaultOpen={false}
-          badge={
-            state.trackingEnabled ? (
-              <span className="rounded border border-sky-glow/40 bg-sky-glow/10 px-1.5 py-0.5 font-mono-data text-[10px] text-sky-glow">
-                on
-              </span>
-            ) : undefined
-          }
-        >
+        <CollapsibleSection title="Open Tracking" icon={<Eye className="size-3.5 text-amber-glow" />} defaultOpen={false} badge={state.trackingEnabled ? <span className="rounded border border-sky-glow/40 bg-sky-glow/10 px-1.5 py-0.5 font-mono-data text-[10px] text-sky-glow">on</span> : undefined}>
           <AnalyticsPanel
             trackingEnabled={state.trackingEnabled}
             onToggle={(v) => patch({ trackingEnabled: v })}
           />
         </CollapsibleSection>
+        <CollapsibleSection title="API Keys" icon={<Key className="size-3.5 text-sky-glow" />} defaultOpen={apiKeys.length === 0}>
+          <GeminiKeyManager keys={apiKeys} onChange={setApiKeys} />
+        </CollapsibleSection>
+        <CollapsibleSection title="Prompt Settings" icon={<Settings className="size-3.5 text-amber-glow" />} defaultOpen={false}>
+          <PromptSettingsPanel prompts={prompts} onChange={setPrompts} />
+        </CollapsibleSection>
+      </SideDrawer>
 
-        <div className="mt-6 space-y-4">
-          <SectionACard
-            state={state}
-            patch={patch}
-            queue={queue}
-            processedCount={processedCount}
-            fireRow={fireRow}
-            skipRow={skipRow}
-            resetRow={resetRow}
-            executeTestHtml={executeHtml}
-            renderedTestHtml={renderedHtml}
-            renderedTestSubject={renderedSubjectB}
-            executeTestPlain={executePlainTest}
-            renderedTestSubjectPlain={renderedSubjectAPreview}
-            sampleRow={sampleRow}
-            activeTemplate={activeTemplate}
-            updateTemplate={updateTemplate}
-            rotation={rotation}
-            resumeTarget={resumeTarget}
-            onConsumeResume={() => setResumeTarget(null)}
-            ai={ai}
-          />
-        </div>
+      <main className="mx-auto max-w-5xl px-3 pb-24 pt-4 sm:px-6">
+        <DragContext.Provider value={{ dragUnlocked, dragPos, setDragPos }}>
+          {resume && (
+            <ResumeBanner
+              lastRow={resume.lastRow}
+              ts={resume.ts}
+              onRestore={acceptResume}
+              onDismiss={() => setResume(null)}
+            />
+          )}
+          {state.homepageMode === "research" ? (
+            <ResearchMode
+              rows={state.rows}
+              headers={state.headers}
+              domainHeader={state.domainHeader}
+              geminiCall={geminiCall}
+              prompts={prompts}
+              trackingEnabled={state.trackingEnabled}
+            />
+          ) : (
+            <div className="space-y-4">
+              <SectionACard
+                state={state}
+                patch={patch}
+                queue={queue}
+                processedCount={processedCount}
+                fireRow={fireRow}
+                skipRow={skipRow}
+                resetRow={resetRow}
+                executeTestHtml={executeHtml}
+                renderedTestHtml={renderedHtml}
+                renderedTestSubject={renderedSubjectB}
+                executeTestPlain={executePlainTest}
+                renderedTestSubjectPlain={renderedSubjectAPreview}
+                sampleRow={sampleRow}
+                activeTemplate={activeTemplate}
+                updateTemplate={updateTemplate}
+                rotation={rotation}
+                resumeTarget={resumeTarget}
+                onConsumeResume={() => setResumeTarget(null)}
+                ai={{ enabled: false, provider: "gemini", apiKey: "", prompt: "", fallback: "", descriptionColumn: "" }}
+              />
+            </div>
+          )}
         </DragContext.Provider>
       </main>
     </div>
   );
 }
+
+/* ============================================================
+   SIDE DRAWER
+   ============================================================ */
+
+function SideDrawer({ open, onClose, children }: { open: boolean; onClose: () => void; children: React.ReactNode }) {
+  // Close on ESC
+  useEffect(() => {
+    if (!open) return;
+    const handler = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [open, onClose]);
+
+  return (
+    <>
+      {/* Backdrop */}
+      {open && (
+        <div
+          className="fixed inset-0 z-40 bg-black/50 backdrop-blur-sm"
+          onClick={onClose}
+          aria-hidden
+        />
+      )}
+      {/* Panel */}
+      <div
+        className={`fixed right-0 top-0 z-50 flex h-full w-full max-w-sm flex-col bg-bg-app shadow-2xl transition-transform duration-200 ${
+          open ? "translate-x-0" : "translate-x-full"
+        }`}
+      >
+        <div className="flex items-center justify-between border-b border-border-strong/60 px-4 py-3">
+          <span className="font-mono-data text-xs uppercase tracking-wider text-muted-foreground">Settings &amp; Tools</span>
+          <button type="button" onClick={onClose} className="rounded-md p-1.5 hover:bg-surface-2" aria-label="Close">
+            <X className="size-4" />
+          </button>
+        </div>
+        <div className="flex-1 overflow-y-auto p-3 space-y-2">
+          {children}
+        </div>
+      </div>
+    </>
+  );
+}
+
+/* ============================================================
+   GEMINI KEY MANAGER
+   ============================================================ */
+
+function GeminiKeyManager({ keys, onChange }: { keys: ApiKey[]; onChange: (updater: (prev: ApiKey[]) => ApiKey[]) => void }) {
+  const [newValue, setNewValue] = useState("");
+  const [newLabel, setNewLabel] = useState("");
+  const [testingAll, setTestingAll] = useState(false);
+
+  const addKey = () => {
+    const v = newValue.trim();
+    if (!v) return;
+    const key: ApiKey = {
+      id: `key_${Math.random().toString(36).slice(2, 9)}`,
+      label: newLabel.trim() || `Key ${keys.length + 1}`,
+      value: v,
+      enabled: true,
+      status: "unknown",
+    };
+    onChange((prev) => [...prev, key]);
+    setNewValue("");
+    setNewLabel("");
+  };
+
+  const testKey = async (id: string) => {
+    const k = keys.find((k) => k.id === id);
+    if (!k) return;
+    onChange((prev) => prev.map((k) => k.id === id ? { ...k, status: "testing" } : k));
+    const result = await testGeminiKey(k.value);
+    onChange((prev) => prev.map((k) => k.id === id ? { ...k, status: result } : k));
+  };
+
+  const testAll = async () => {
+    setTestingAll(true);
+    for (const k of keys) {
+      onChange((prev) => prev.map((pk) => pk.id === k.id ? { ...pk, status: "testing" } : pk));
+      const result = await testGeminiKey(k.value);
+      onChange((prev) => prev.map((pk) => pk.id === k.id ? { ...pk, status: result } : pk));
+    }
+    setTestingAll(false);
+    toast.success("All keys tested");
+  };
+
+  const statusIcon = (status: ApiKey["status"]) => {
+    if (status === "testing") return <RefreshCw className="size-3.5 animate-spin text-muted-foreground" />;
+    if (status === "active") return <CheckCircle className="size-3.5 text-green-500" />;
+    if (status === "quota") return <AlertCircle className="size-3.5 text-amber-glow" />;
+    if (status === "invalid") return <XCircle className="size-3.5 text-destructive" />;
+    return <div className="size-3.5 rounded-full border border-border-strong/60" />;
+  };
+
+  const statusLabel = (status: ApiKey["status"]) => {
+    if (status === "testing") return "Testing…";
+    if (status === "active") return "Active";
+    if (status === "quota") return "Quota exhausted";
+    if (status === "invalid") return "Invalid";
+    return "Untested";
+  };
+
+  return (
+    <div className="space-y-3">
+      <p className="font-mono-data text-[10px] leading-relaxed text-muted-foreground">
+        Add multiple Gemini API keys from different Google accounts. The app rotates automatically when one is quota-exhausted. Keys are saved only in your browser.
+      </p>
+
+      {/* Key list */}
+      {keys.length > 0 && (
+        <div className="space-y-2">
+          {keys.map((k) => (
+            <div key={k.id} className={`rounded-lg border p-2.5 ${k.enabled ? "border-border-strong/60" : "border-border-strong/30 opacity-50"}`}>
+              <div className="flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  checked={k.enabled}
+                  onChange={(e) => onChange((prev) => prev.map((pk) => pk.id === k.id ? { ...pk, enabled: e.target.checked } : pk))}
+                  className="size-4 accent-[var(--sky)] shrink-0"
+                  title="Enable / disable this key"
+                />
+                <span className="min-w-0 flex-1 font-mono-data text-[11px] text-foreground truncate">{k.label}</span>
+                <span className="flex items-center gap-1 font-mono-data text-[10px] text-muted-foreground shrink-0">
+                  {statusIcon(k.status)}
+                  {statusLabel(k.status)}
+                </span>
+              </div>
+              <div className="mt-1.5 flex gap-2">
+                <span className="flex-1 font-mono-data text-[10px] text-muted-foreground truncate">
+                  {k.value.slice(0, 6)}…{k.value.slice(-4)}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => testKey(k.id)}
+                  disabled={k.status === "testing"}
+                  className="font-mono-data text-[10px] text-sky-glow underline decoration-dotted disabled:opacity-50"
+                >
+                  Test
+                </button>
+                <button
+                  type="button"
+                  onClick={() => onChange((prev) => prev.filter((pk) => pk.id !== k.id))}
+                  className="font-mono-data text-[10px] text-destructive underline decoration-dotted"
+                >
+                  Remove
+                </button>
+              </div>
+            </div>
+          ))}
+          <button
+            type="button"
+            onClick={testAll}
+            disabled={testingAll}
+            className="w-full rounded-md border border-border-strong/60 py-2 font-mono-data text-[11px] text-muted-foreground hover:text-foreground disabled:opacity-50"
+          >
+            {testingAll ? "Testing all…" : "Test all keys"}
+          </button>
+        </div>
+      )}
+
+      {/* Add new key */}
+      <div className="space-y-2 rounded-lg border border-border-strong/40 bg-surface-2 p-2.5">
+        <p className="font-mono-data text-[10px] uppercase tracking-wider text-muted-foreground">Add new key</p>
+        <Input
+          value={newLabel}
+          onChange={(e) => setNewLabel(e.target.value)}
+          placeholder="Label (e.g. Google Account 1)"
+          className="h-8 font-mono-data text-xs"
+        />
+        <Input
+          value={newValue}
+          onChange={(e) => setNewValue(e.target.value)}
+          placeholder="AIza…"
+          type="password"
+          className="h-8 font-mono-data text-xs"
+          autoComplete="off"
+          spellCheck={false}
+          onKeyDown={(e) => { if (e.key === "Enter") addKey(); }}
+        />
+        <Button onClick={addKey} disabled={!newValue.trim()} className="w-full h-8 text-xs">
+          <Plus className="size-3.5" /> Add key
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+/* ============================================================
+   PROMPT SETTINGS PANEL
+   ============================================================ */
+
+function PromptSettingsPanel({
+  prompts, onChange,
+}: {
+  prompts: { research: string; email: string; html: string };
+  onChange: (p: { research: string; email: string; html: string }) => void;
+}) {
+  const [local, setLocal] = useState(prompts);
+  const [saved, setSaved] = useState(false);
+
+  useEffect(() => { setLocal(prompts); }, [prompts]);
+
+  const save = () => {
+    onChange(local);
+    setSaved(true);
+    toast.success("Prompts saved");
+    setTimeout(() => setSaved(false), 2000);
+  };
+
+  const reset = (key: "research" | "email" | "html") => {
+    const defaults = { research: DEFAULT_RESEARCH_PROMPT, email: DEFAULT_EMAIL_PROMPT, html: DEFAULT_HTML_PROMPT };
+    setLocal((p) => ({ ...p, [key]: defaults[key] }));
+    toast.info(`${key} prompt reset to default`);
+  };
+
+  return (
+    <div className="space-y-4">
+      <p className="font-mono-data text-[10px] leading-relaxed text-muted-foreground">
+        Edit the prompts that drive the Research + Email Writer. Changes take effect on the next AI call. Use Reset to restore the original.
+      </p>
+
+      {(["research", "email", "html"] as const).map((key) => (
+        <div key={key} className="space-y-1.5">
+          <div className="flex items-center justify-between">
+            <Label className="font-mono-data text-[10px] uppercase tracking-wider text-muted-foreground">
+              {key === "research" ? "Research Prompt" : key === "email" ? "Email Writing Prompt" : "HTML Output Prompt"}
+            </Label>
+            <button
+              type="button"
+              onClick={() => reset(key)}
+              className="flex items-center gap-1 font-mono-data text-[10px] text-muted-foreground underline decoration-dotted hover:text-foreground"
+            >
+              <RotateCcw className="size-3" /> Reset
+            </button>
+          </div>
+          <Textarea
+            value={local[key]}
+            onChange={(e) => setLocal((p) => ({ ...p, [key]: e.target.value }))}
+            rows={key === "html" ? 6 : 10}
+            className="font-mono-data text-[11px] leading-relaxed"
+            spellCheck={false}
+          />
+        </div>
+      ))}
+
+      <Button onClick={save} className="w-full glow-sky">
+        <Save className="size-3.5" />
+        {saved ? "Saved!" : "Save all prompts"}
+      </Button>
+    </div>
+  );
+}
+
+/* ============================================================
+   RESEARCH MODE
+   ============================================================ */
+
+interface ApproachItem {
+  number: number;
+  title: string;
+  why: string;
+  bestFor: string;
+  tone: string;
+  hook: string;
+}
+
+type ResearchStage = "idle" | "researching" | "brief" | "generatingApproaches" | "approaches" | "generatingEmail" | "email";
+
+function ResearchMode({
+  rows, headers, domainHeader, geminiCall, prompts, trackingEnabled,
+}: {
+  rows: Row[];
+  headers: string[];
+  domainHeader: string;
+  geminiCall: (prompt: string, useWebSearch?: boolean) => Promise<string>;
+  prompts: { research: string; email: string; html: string };
+  trackingEnabled: boolean;
+}) {
+  const [selectedLeadIdx, setSelectedLeadIdx] = useState<number | null>(null);
+  const [manualInput, setManualInput] = useState("");
+  const [stage, setStage] = useState<ResearchStage>("idle");
+  const [brief, setBrief] = useState("");
+  const [approaches, setApproaches] = useState<ApproachItem[]>([]);
+  const [selectedApproaches, setSelectedApproaches] = useState<number[]>([]);
+  const [generatedEmails, setGeneratedEmails] = useState<{ approach: number; title: string; subject: string; plain: string; html: string }[]>([]);
+  const [activeEmailTab, setActiveEmailTab] = useState(0);
+  const [editingHtml, setEditingHtml] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+
+  const storeInput = useMemo(() => {
+    if (selectedLeadIdx !== null && rows[selectedLeadIdx]) {
+      const row = rows[selectedLeadIdx];
+      return row[domainHeader] || Object.values(row).join(", ");
+    }
+    return manualInput.trim();
+  }, [selectedLeadIdx, rows, domainHeader, manualInput]);
+
+  const filteredRows = useMemo(() => {
+    if (!searchQuery.trim()) return rows.map((_, i) => i);
+    const q = searchQuery.toLowerCase();
+    return rows.map((_, i) => i).filter((i) => {
+      const row = rows[i];
+      const domain = row[domainHeader] || "";
+      return domain.toLowerCase().includes(q) || Object.values(row).some((v) => String(v).toLowerCase().includes(q));
+    });
+  }, [rows, domainHeader, searchQuery]);
+
+  const reset = () => {
+    setStage("idle");
+    setBrief("");
+    setApproaches([]);
+    setSelectedApproaches([]);
+    setGeneratedEmails([]);
+    setActiveEmailTab(0);
+    setEditingHtml(false);
+  };
+
+  const selectLead = (idx: number) => {
+    setSelectedLeadIdx(idx);
+    setManualInput("");
+    reset();
+  };
+
+  const runResearch = async () => {
+    const input = storeInput;
+    if (!input) { toast.error("Enter a store name or URL, or select a lead from the list"); return; }
+    setStage("researching");
+    setBrief("");
+    setApproaches([]);
+    setSelectedApproaches([]);
+    setGeneratedEmails([]);
+    try {
+      const result = await geminiCall(`${prompts.research}\n\nStore to research: ${input}`, true);
+      setBrief(result);
+      setStage("brief");
+    } catch (err) {
+      toast.error((err as Error).message);
+      setStage("idle");
+    }
+  };
+
+  const generateApproaches = async () => {
+    if (!brief) return;
+    setStage("generatingApproaches");
+    try {
+      const prompt = `${prompts.email}\n\nResearch Brief:\n${brief}\n\nNow complete Step 2: return ONLY the JSON array of 4 approaches. No other text, no markdown, no backticks.`;
+      const raw = await geminiCall(prompt);
+      // Extract JSON array from response
+      const jsonMatch = raw.match(/\[[\s\S]*\]/);
+      if (!jsonMatch) throw new Error("Could not parse approach options from AI response");
+      const parsed = JSON.parse(jsonMatch[0]) as ApproachItem[];
+      setApproaches(parsed);
+      setStage("approaches");
+    } catch (err) {
+      toast.error(`Failed to generate approaches: ${(err as Error).message}`);
+      setStage("brief");
+    }
+  };
+
+  const generateEmails = async () => {
+    if (selectedApproaches.length === 0) { toast.error("Select at least one approach"); return; }
+    setStage("generatingEmail");
+    const emails: typeof generatedEmails = [];
+    for (const num of selectedApproaches) {
+      const approach = approaches.find((a) => a.number === num);
+      if (!approach) continue;
+      try {
+        // Step 3: Generate the full email
+        const emailPrompt = `${prompts.email}\n\nResearch Brief:\n${brief}\n\nStep 3: Write the full email using approach #${num}: "${approach.title}". Include subject line. Return it as plain text with "Subject: ..." on the first line, then a blank line, then the email body.`;
+        const plainResult = await geminiCall(emailPrompt);
+
+        // Extract subject and body
+        const lines = plainResult.split("\n");
+        const subjectLine = lines.find((l) => l.toLowerCase().startsWith("subject:")) ?? "";
+        const subject = subjectLine.replace(/^subject:\s*/i, "").trim();
+        const bodyStart = lines.findIndex((l) => l.toLowerCase().startsWith("subject:"));
+        const plainBody = lines.slice(bodyStart + 1).join("\n").trim();
+
+        // Step 4: Convert to HTML
+        const htmlPrompt = `${prompts.html}\n\nEmail to convert:\n\nSubject: ${subject}\n\n${plainBody}`;
+        const htmlResult = await geminiCall(htmlPrompt);
+
+        emails.push({ approach: num, title: approach.title, subject, plain: plainBody, html: htmlResult });
+      } catch (err) {
+        toast.error(`Approach ${num} failed: ${(err as Error).message}`);
+      }
+    }
+    if (emails.length > 0) {
+      setGeneratedEmails(emails);
+      setActiveEmailTab(0);
+      setStage("email");
+    } else {
+      setStage("approaches");
+    }
+  };
+
+  const copyHtml = async (html: string) => {
+    try {
+      const blobHtml = new Blob([html], { type: "text/html" });
+      const blobText = new Blob([html.replace(/<[^>]+>/g, "")], { type: "text/plain" });
+      if ("ClipboardItem" in window && navigator.clipboard?.write) {
+        await navigator.clipboard.write([new ClipboardItem({ "text/html": blobHtml, "text/plain": blobText })]);
+      } else { await navigator.clipboard.writeText(html); }
+      toast.success("HTML copied to clipboard — paste into Gmail");
+    } catch (e) { toast.error(`Clipboard failed: ${(e as Error).message}`); }
+  };
+
+  return (
+    <div className="space-y-4">
+      {/* Lead list (only shown when rows available and no email generated yet) */}
+      {rows.length > 0 && stage !== "email" && (
+        <div className="rounded-xl border border-border-strong/70 bg-surface-1 overflow-hidden">
+          <div className="flex items-center gap-2 border-b border-border-strong/60 px-3 py-2">
+            <Search className="size-3.5 text-muted-foreground shrink-0" />
+            <input
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder={`Search ${rows.length.toLocaleString()} leads…`}
+              className="flex-1 bg-transparent font-mono-data text-xs text-foreground outline-none placeholder:text-muted-foreground"
+            />
+            {searchQuery && (
+              <button type="button" onClick={() => setSearchQuery("")} className="text-muted-foreground">
+                <X className="size-3.5" />
+              </button>
+            )}
+          </div>
+          <div className="max-h-48 overflow-y-auto divide-y divide-border-strong/30">
+            {filteredRows.slice(0, 200).map((i) => {
+              const row = rows[i];
+              const domain = row[domainHeader] || Object.values(row)[0] || `Row ${i}`;
+              return (
+                <button
+                  key={i}
+                  type="button"
+                  onClick={() => selectLead(i)}
+                  className={`flex w-full items-center gap-2 px-3 py-2 text-left hover:bg-surface-2 ${selectedLeadIdx === i ? "bg-sky-glow/10 border-l-2 border-sky-glow" : ""}`}
+                >
+                  <Globe className="size-3 text-muted-foreground shrink-0" />
+                  <span className="min-w-0 flex-1 font-mono-data text-xs text-foreground truncate">{domain}</span>
+                  <ChevronRight className="size-3 text-muted-foreground shrink-0" />
+                </button>
+              );
+            })}
+            {filteredRows.length === 0 && (
+              <p className="py-4 text-center font-mono-data text-xs text-muted-foreground">No leads match your search</p>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Manual input */}
+      {stage === "idle" || stage === "researching" ? (
+        <div className="rounded-xl border border-border-strong/70 bg-surface-1 p-4 space-y-3">
+          <p className="font-mono-data text-[10px] uppercase tracking-wider text-muted-foreground">
+            {selectedLeadIdx !== null ? "Selected lead" : "Or enter a store manually"}
+          </p>
+          {selectedLeadIdx !== null && rows[selectedLeadIdx] ? (
+            <div className="flex items-center gap-2 rounded-lg border border-sky-glow/40 bg-sky-glow/5 px-3 py-2">
+              <Globe className="size-4 text-sky-glow shrink-0" />
+              <span className="flex-1 font-mono-data text-sm text-foreground truncate">
+                {rows[selectedLeadIdx][domainHeader] || Object.values(rows[selectedLeadIdx])[0]}
+              </span>
+              <button type="button" onClick={() => { setSelectedLeadIdx(null); reset(); }} className="text-muted-foreground hover:text-foreground">
+                <X className="size-4" />
+              </button>
+            </div>
+          ) : (
+            <Input
+              value={manualInput}
+              onChange={(e) => setManualInput(e.target.value)}
+              placeholder="e.g. allbirds.com or Allbirds"
+              className="font-mono-data text-sm"
+              onKeyDown={(e) => { if (e.key === "Enter") runResearch(); }}
+            />
+          )}
+          <Button
+            onClick={runResearch}
+            disabled={stage === "researching" || !storeInput}
+            className="w-full glow-sky"
+          >
+            {stage === "researching" ? (
+              <><RefreshCw className="size-4 animate-spin" /> Researching…</>
+            ) : (
+              <><Globe className="size-4" /> Research this store</>
+            )}
+          </Button>
+        </div>
+      ) : null}
+
+      {/* Research brief */}
+      {(stage === "brief" || stage === "generatingApproaches" || stage === "approaches" || stage === "generatingEmail") && brief && (
+        <div className="rounded-xl border border-border-strong/70 bg-surface-1 overflow-hidden">
+          <div className="flex items-center justify-between border-b border-border-strong/60 px-4 py-2.5">
+            <span className="flex items-center gap-2 font-mono-data text-[11px] uppercase tracking-wider text-muted-foreground">
+              <BookOpen className="size-3.5 text-sky-glow" /> Research Brief
+            </span>
+            <button type="button" onClick={reset} className="font-mono-data text-[10px] text-muted-foreground underline decoration-dotted hover:text-foreground">
+              Start over
+            </button>
+          </div>
+          <div className="p-4">
+            <div className="prose prose-sm prose-invert max-w-none">
+              <pre className="whitespace-pre-wrap font-sans text-sm leading-relaxed text-foreground">{brief}</pre>
+            </div>
+          </div>
+          {stage === "brief" && (
+            <div className="border-t border-border-strong/60 p-3">
+              <Button onClick={generateApproaches} className="w-full glow-sky">
+                <Sparkles className="size-4" /> Generate email approaches
+              </Button>
+            </div>
+          )}
+          {stage === "generatingApproaches" && (
+            <div className="border-t border-border-strong/60 p-3">
+              <Button disabled className="w-full">
+                <RefreshCw className="size-4 animate-spin" /> Generating approaches…
+              </Button>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Approach cards */}
+      {(stage === "approaches" || stage === "generatingEmail") && approaches.length > 0 && (
+        <div className="space-y-3">
+          <div className="flex items-center justify-between">
+            <p className="font-mono-data text-[11px] uppercase tracking-wider text-muted-foreground">
+              Choose your angle(s)
+            </p>
+            <p className="font-mono-data text-[10px] text-muted-foreground">
+              {selectedApproaches.length} selected
+            </p>
+          </div>
+          {approaches.map((a) => {
+            const selected = selectedApproaches.includes(a.number);
+            return (
+              <button
+                key={a.number}
+                type="button"
+                onClick={() => setSelectedApproaches((prev) =>
+                  selected ? prev.filter((n) => n !== a.number) : [...prev, a.number]
+                )}
+                className={`w-full rounded-xl border p-3.5 text-left transition-all ${
+                  selected
+                    ? "border-sky-glow/60 bg-sky-glow/5 ring-1 ring-sky-glow/30"
+                    : "border-border-strong/60 bg-surface-1 hover:bg-surface-2"
+                }`}
+              >
+                <div className="flex items-start gap-3">
+                  <div className={`mt-0.5 flex size-6 shrink-0 items-center justify-center rounded-full font-mono-data text-xs font-bold ${selected ? "bg-sky-glow text-black" : "bg-surface-2 text-muted-foreground"}`}>
+                    {a.number}
+                  </div>
+                  <div className="min-w-0 space-y-2">
+                    <p className="font-semibold text-sm text-foreground">{a.title}</p>
+                    <p className="font-mono-data text-[11px] leading-relaxed text-muted-foreground">{a.why}</p>
+                    <div className="flex flex-wrap gap-x-4 gap-y-1">
+                      <span className="font-mono-data text-[10px] text-muted-foreground">
+                        <span className="text-sky-glow">Best for:</span> {a.bestFor}
+                      </span>
+                      <span className="font-mono-data text-[10px] text-muted-foreground">
+                        <span className="text-amber-glow">Tone:</span> {a.tone}
+                      </span>
+                    </div>
+                    <div className="rounded-lg border border-border-strong/40 bg-bg-app px-3 py-2">
+                      <p className="font-mono-data text-[10px] uppercase tracking-wider text-muted-foreground mb-1">Opening hook</p>
+                      <p className="font-sans text-[12px] italic text-foreground leading-relaxed">"{a.hook}"</p>
+                    </div>
+                  </div>
+                </div>
+              </button>
+            );
+          })}
+          <Button
+            onClick={generateEmails}
+            disabled={selectedApproaches.length === 0 || stage === "generatingEmail"}
+            className="w-full glow-sky"
+          >
+            {stage === "generatingEmail" ? (
+              <><RefreshCw className="size-4 animate-spin" /> Generating {selectedApproaches.length} email{selectedApproaches.length > 1 ? "s" : ""}…</>
+            ) : (
+              <><PenLine className="size-4" /> Generate {selectedApproaches.length > 0 ? `${selectedApproaches.length} email${selectedApproaches.length > 1 ? "s" : ""}` : "email"}</>
+            )}
+          </Button>
+        </div>
+      )}
+
+      {/* Generated emails */}
+      {stage === "email" && generatedEmails.length > 0 && (
+        <div className="rounded-xl border border-border-strong/70 bg-surface-1 overflow-hidden">
+          <div className="flex items-center justify-between border-b border-border-strong/60 px-4 py-2.5">
+            <span className="flex items-center gap-2 font-mono-data text-[11px] uppercase tracking-wider text-muted-foreground">
+              <PenLine className="size-3.5 text-sky-glow" /> Generated Emails
+            </span>
+            <button type="button" onClick={() => setStage("approaches")} className="font-mono-data text-[10px] text-muted-foreground underline decoration-dotted hover:text-foreground">
+              Back to approaches
+            </button>
+          </div>
+
+          {/* Tabs if multiple emails */}
+          {generatedEmails.length > 1 && (
+            <div className="flex border-b border-border-strong/60 overflow-x-auto">
+              {generatedEmails.map((e, i) => (
+                <button
+                  key={i}
+                  type="button"
+                  onClick={() => setActiveEmailTab(i)}
+                  className={`shrink-0 px-4 py-2 font-mono-data text-[11px] whitespace-nowrap ${
+                    activeEmailTab === i
+                      ? "border-b-2 border-sky-glow text-sky-glow"
+                      : "text-muted-foreground hover:text-foreground"
+                  }`}
+                >
+                  #{e.approach} {e.title}
+                </button>
+              ))}
+            </div>
+          )}
+
+          {/* Active email */}
+          {(() => {
+            const email = generatedEmails[activeEmailTab];
+            if (!email) return null;
+            return (
+              <div className="p-4 space-y-3">
+                <div className="rounded-lg border border-border-strong/60 bg-surface-2 px-3 py-2">
+                  <p className="font-mono-data text-[10px] uppercase tracking-wider text-muted-foreground mb-1">Subject line</p>
+                  <p className="font-sans text-sm font-medium text-foreground">{email.subject}</p>
+                </div>
+
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setEditingHtml(false)}
+                    className={`flex-1 rounded-md border py-1.5 font-mono-data text-[11px] ${!editingHtml ? "border-sky-glow/60 bg-sky-glow/10 text-sky-glow" : "border-border-strong/60 text-muted-foreground"}`}
+                  >
+                    Preview
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setEditingHtml(true)}
+                    className={`flex-1 rounded-md border py-1.5 font-mono-data text-[11px] ${editingHtml ? "border-sky-glow/60 bg-sky-glow/10 text-sky-glow" : "border-border-strong/60 text-muted-foreground"}`}
+                  >
+                    Edit HTML
+                  </button>
+                </div>
+
+                {editingHtml ? (
+                  <Textarea
+                    value={email.html}
+                    onChange={(e) => {
+                      const newHtml = e.target.value;
+                      setGeneratedEmails((prev) => prev.map((em, i) => i === activeEmailTab ? { ...em, html: newHtml } : em));
+                    }}
+                    rows={12}
+                    className="font-mono-data text-[11px] leading-relaxed"
+                    spellCheck={false}
+                  />
+                ) : (
+                  <div className="overflow-hidden rounded-lg border border-border-strong/60 bg-white">
+                    <iframe
+                      srcDoc={`<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head><body style="margin:0;padding:0">${email.html}</body></html>`}
+                      className="w-full"
+                      style={{ height: "400px", border: "none" }}
+                      title="Email preview"
+                      sandbox="allow-same-origin"
+                    />
+                  </div>
+                )}
+
+                <Button onClick={() => copyHtml(email.html)} className="w-full glow-sky">
+                  <Clipboard className="size-4" /> Copy HTML — paste into Gmail
+                </Button>
+
+                <button
+                  type="button"
+                  onClick={reset}
+                  className="w-full rounded-md border border-border-strong/60 py-2 font-mono-data text-[11px] text-muted-foreground hover:text-foreground"
+                >
+                  Research another store
+                </button>
+              </div>
+            );
+          })()}
+        </div>
+      )}
+    </div>
+  );
+}
+
 
 /* --------------------- Draggable Send button shell --------------------- */
 
@@ -1061,6 +1767,7 @@ function DraggableSendShell({ children }: { children: React.ReactNode }) {
 
 function Header({
   theme, onToggleTheme, onClearAll, totalRows, processedRows, onHeaderTap, dragUnlocked,
+  homepageMode, onToggleMode, onOpenDrawer,
 }: {
   theme: "dark" | "light";
   onToggleTheme: () => void;
@@ -1069,6 +1776,9 @@ function Header({
   processedRows: number;
   onHeaderTap: () => void;
   dragUnlocked: boolean;
+  homepageMode: HomepageMode;
+  onToggleMode: (m: HomepageMode) => void;
+  onOpenDrawer: () => void;
 }) {
   const [open, setOpen] = useState(false);
   return (
@@ -1081,12 +1791,12 @@ function Header({
           <div className="min-w-0">
             <h1
               onClick={onHeaderTap}
-              title="Double-tap to unlock the Send button · single tap to lock"
+              title="Double-tap to unlock the Send button"
               className={`cursor-pointer select-none truncate text-sm font-semibold leading-tight sm:text-base ${
                 dragUnlocked ? "text-amber-glow" : ""
               }`}
             >
-              Wayne Enterprises <span className="text-sky-glow">Outreach Lab</span>
+              <span className="text-sky-glow">Outreach Lab</span>
               {dragUnlocked && (
                 <span className="ml-2 align-middle rounded border border-[var(--amber)]/60 bg-[var(--amber)]/15 px-1.5 py-0.5 font-mono-data text-[9px] uppercase tracking-wider text-[var(--amber)]">
                   drag unlocked
@@ -1097,6 +1807,32 @@ function Header({
               {processedRows.toLocaleString()} / {totalRows.toLocaleString()} processed
             </p>
           </div>
+        </div>
+
+        {/* Mode toggle */}
+        <div className="flex rounded-lg border border-border-strong/60 overflow-hidden shrink-0">
+          <button
+            type="button"
+            onClick={() => onToggleMode("research")}
+            className={`px-2.5 py-1.5 font-mono-data text-[10px] uppercase tracking-wider transition-colors ${
+              homepageMode === "research"
+                ? "bg-sky-glow text-black"
+                : "bg-transparent text-muted-foreground hover:text-foreground"
+            }`}
+          >
+            Research
+          </button>
+          <button
+            type="button"
+            onClick={() => onToggleMode("queue")}
+            className={`px-2.5 py-1.5 font-mono-data text-[10px] uppercase tracking-wider transition-colors ${
+              homepageMode === "queue"
+                ? "bg-sky-glow text-black"
+                : "bg-transparent text-muted-foreground hover:text-foreground"
+            }`}
+          >
+            Queue
+          </button>
         </div>
 
         <Button variant="ghost" size="icon" onClick={onToggleTheme} aria-label="Toggle theme">
@@ -1124,6 +1860,10 @@ function Header({
             </DialogFooter>
           </DialogContent>
         </Dialog>
+
+        <Button variant="ghost" size="icon" onClick={onOpenDrawer} aria-label="Open settings">
+          <Menu className="size-4" />
+        </Button>
       </div>
     </header>
   );
@@ -1133,7 +1873,7 @@ function Header({
 
 function IngestPanel({
   parsing, progress, onFile, headers, totalRows, processedRows,
-  targetEmailHeader, onTargetEmailHeader,
+  targetEmailHeader, onTargetEmailHeader, domainHeader, onDomainHeader,
 }: {
   parsing: boolean;
   progress: number;
@@ -1143,6 +1883,8 @@ function IngestPanel({
   processedRows: number;
   targetEmailHeader: string;
   onTargetEmailHeader: (v: string) => void;
+  domainHeader: string;
+  onDomainHeader: (v: string) => void;
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
   return (
@@ -1201,6 +1943,21 @@ function IngestPanel({
               onChange={(e) => onTargetEmailHeader(e.target.value)}
               className="h-9 w-full rounded-md border border-border-strong/70 bg-surface-2 px-2 font-mono-data text-sm outline-none focus:glow-sky"
             >
+              {headers.map((h) => (
+                <option key={h} value={h}>{h}</option>
+              ))}
+            </select>
+          </div>
+          <div className="mt-2 grid gap-2 sm:grid-cols-[200px_1fr] sm:items-center">
+            <Label className="text-xs uppercase tracking-wider text-muted-foreground">
+              Domain / store column
+            </Label>
+            <select
+              value={domainHeader}
+              onChange={(e) => onDomainHeader(e.target.value)}
+              className="h-9 w-full rounded-md border border-border-strong/70 bg-surface-2 px-2 font-mono-data text-sm outline-none focus:glow-sky"
+            >
+              <option value="">-- Not set --</option>
               {headers.map((h) => (
                 <option key={h} value={h}>{h}</option>
               ))}
@@ -2575,123 +3332,5 @@ function AnalyticsPanel({
         </>
       )}
     </>
-  );
-}
-
-/* ===================== AI Personalization Panel ===================== */
-
-function AIPersonalizationPanel({
-  ai, onChange,
-}: { ai: AISettings; onChange: (next: AISettings) => void }) {
-  const [open, setOpen] = useState(false);
-  const [reveal, setReveal] = useState(false);
-  const set = <K extends keyof AISettings>(k: K, v: AISettings[K]) =>
-    onChange({ ...ai, [k]: v });
-  return (
-    <section className="mb-3 rounded-xl border border-border-strong/70 bg-surface-1">
-      <button
-        type="button"
-        onClick={() => setOpen((o) => !o)}
-        className="flex w-full items-center justify-between gap-2 p-3"
-      >
-        <span className="flex items-center gap-2 font-mono-data text-[11px] uppercase tracking-wider text-muted-foreground">
-          <Zap className="size-3.5 text-sky-glow" />
-          AI Personalization · {"{ai_insight}"}
-          <span
-            className={`ml-1 rounded px-1.5 py-0.5 text-[10px] ${
-              ai.enabled && ai.apiKey
-                ? "border border-sky-glow/40 bg-sky-glow/10 text-sky-glow"
-                : "border border-border-strong/50 bg-bg-app text-muted-foreground"
-            }`}
-          >
-            {ai.enabled && ai.apiKey ? "live" : "off"}
-          </span>
-        </span>
-        <span className="flex items-center gap-2 font-mono-data text-[11px] text-muted-foreground">
-          {ai.provider}
-          {open ? <ChevronUp className="size-3.5" /> : <ChevronDown className="size-3.5" />}
-        </span>
-      </button>
-      {open && (
-        <div className="space-y-3 border-t border-border-strong/40 p-3">
-          <div className="grid gap-2 sm:grid-cols-[auto_1fr_auto] sm:items-center">
-            <label className="flex items-center gap-2 font-mono-data text-[11px] text-foreground">
-              <input
-                type="checkbox"
-                checked={ai.enabled}
-                onChange={(e) => set("enabled", e.target.checked)}
-                className="size-4 accent-[var(--sky)]"
-              />
-              Enable
-            </label>
-            <select
-              value={ai.provider}
-              onChange={(e) => set("provider", e.target.value as "gemini" | "openai")}
-              className="h-8 rounded-md border border-border-strong/70 bg-bg-app px-2 font-mono-data text-xs outline-none focus:glow-sky"
-            >
-              <option value="gemini">Google Gemini</option>
-              <option value="openai">OpenAI</option>
-            </select>
-            <span className="font-mono-data text-[10px] text-muted-foreground">
-              Key saved locally
-            </span>
-          </div>
-          <Field label={`${ai.provider === "gemini" ? "Gemini" : "OpenAI"} API key`}>
-            <div className="flex gap-2">
-              <Input
-                type={reveal ? "text" : "password"}
-                value={ai.apiKey}
-                onChange={(e) => set("apiKey", e.target.value)}
-                placeholder={ai.provider === "gemini" ? "AIza…" : "sk-…"}
-                className="font-mono-data text-xs"
-                autoComplete="off"
-                spellCheck={false}
-              />
-              <Button
-                size="sm"
-                variant="ghost"
-                type="button"
-                onClick={() => setReveal((r) => !r)}
-                className="h-9"
-              >
-                {reveal ? "Hide" : "Show"}
-              </Button>
-            </div>
-          </Field>
-          <div className="grid gap-2 sm:grid-cols-2">
-            <Field label="Store description column">
-              <Input
-                value={ai.descriptionColumn}
-                onChange={(e) => set("descriptionColumn", e.target.value)}
-                placeholder="store_description"
-                className="font-mono-data text-xs"
-              />
-            </Field>
-            <Field label="Fallback phrase">
-              <Input
-                value={ai.fallback}
-                onChange={(e) => set("fallback", e.target.value)}
-                placeholder="your unique collection"
-                className="font-mono-data text-xs"
-              />
-            </Field>
-          </div>
-          <Field label="AI Generation Prompt Blueprint">
-            <Textarea
-              value={ai.prompt}
-              onChange={(e) => set("prompt", e.target.value)}
-              rows={4}
-              className="font-mono-data text-[12px] leading-relaxed"
-              placeholder="Write a brief 7-word phrase about a category they specialize in…"
-            />
-          </Field>
-          <p className="font-mono-data text-[10px] text-muted-foreground">
-            Insert <span className="text-sky-glow">{"{ai_insight}"}</span> anywhere in a Subject or Body template.
-            When the active row exposes <span className="text-sky-glow">{ai.descriptionColumn}</span>, a custom
-            sentence is fetched in the background and injected. Missing data → fallback phrase.
-          </p>
-        </div>
-      )}
-    </section>
   );
 }
