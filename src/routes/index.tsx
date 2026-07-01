@@ -495,6 +495,20 @@ function buildMailto(to: string, opts: { subject?: string; body?: string; bcc?: 
   return `mailto:${encodeURIComponent(to)}${q ? `?${q}` : ""}`;
 }
 
+// Pulls a recipient address out of the research brief's "Contact info"
+// section. Prefers a direct (non generic-inbox) address over a fallback
+// like info@ / support@ / hello@, matching how the research prompt itself
+// is instructed to flag generic addresses as a last resort.
+const EMAIL_IN_TEXT_RE = /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g;
+const GENERIC_INBOX_RE = /^(info|support|hello|sales|contact|admin|help|team|office|enquiries|inquiries)@/i;
+function extractContactEmail(brief: string): string {
+  if (!brief) return "";
+  const matches = brief.match(EMAIL_IN_TEXT_RE) ?? [];
+  if (matches.length === 0) return "";
+  const direct = matches.find((e) => !GENERIC_INBOX_RE.test(e));
+  return direct ?? matches[0];
+}
+
 function fmtDuration(s: number): string {
   if (s < 60) return `${s}s`;
   if (s < 3600) return `${Math.floor(s / 60)}m ${s % 60}s`;
@@ -1276,6 +1290,10 @@ function ResearchMode({
     });
   }, [rows, domainHeader, searchQuery]);
 
+  // Recipient pulled from the brief's contact-info section — used to
+  // prefill the mailto: on "Send this one". Left blank if none was found.
+  const contactEmail = useMemo(() => extractContactEmail(brief), [brief]);
+
   const reset = () => {
     setStage("idle");
     setBrief("");
@@ -1374,6 +1392,15 @@ function ResearchMode({
       } else { await navigator.clipboard.writeText(html); }
       toast.success("HTML copied to clipboard — paste into Gmail");
     } catch (e) { toast.error(`Clipboard failed: ${(e as Error).message}`); }
+  };
+
+  // Copies the HTML to clipboard (same as Copy HTML) then opens a mailto:
+  // with the subject and recipient prefilled, so the only remaining step
+  // is pasting the already-copied HTML into the compose window body.
+  const sendEmail = async (subject: string, html: string) => {
+    await copyHtml(html);
+    const href = buildMailto(contactEmail, { subject });
+    setTimeout(() => { window.location.href = href; }, 300);
   };
 
   return (
@@ -1595,7 +1622,27 @@ function ResearchMode({
               <div className="p-4 space-y-3">
                 <div className="rounded-lg border border-border-strong/60 bg-surface-2 px-3 py-2">
                   <p className="font-mono-data text-[10px] uppercase tracking-wider text-muted-foreground mb-1">Subject line</p>
-                  <p className="font-sans text-sm font-medium text-foreground">{email.subject}</p>
+                  <input
+                    value={email.subject}
+                    onChange={(e) => {
+                      const newSubject = e.target.value;
+                      setGeneratedEmails((prev) => prev.map((em, i) => i === activeEmailTab ? { ...em, subject: newSubject } : em));
+                    }}
+                    className="w-full bg-transparent font-sans text-sm font-medium text-foreground outline-none"
+                    placeholder="Subject line…"
+                  />
+                </div>
+
+                <div className="rounded-lg border border-border-strong/60 bg-surface-2 px-3 py-2">
+                  <p className="font-mono-data text-[10px] uppercase tracking-wider text-muted-foreground mb-1">
+                    Recipient {contactEmail ? <span className="text-sky-glow normal-case">(from brief)</span> : <span className="text-amber-glow normal-case">(not found — fill in manually)</span>}
+                  </p>
+                  <input
+                    value={contactEmail}
+                    readOnly
+                    placeholder="No contact email found in brief"
+                    className="w-full bg-transparent font-mono-data text-xs text-foreground outline-none placeholder:text-muted-foreground"
+                  />
                 </div>
 
                 <div className="flex gap-2">
@@ -1641,6 +1688,16 @@ function ResearchMode({
                 <Button onClick={() => copyHtml(email.html)} className="w-full glow-sky">
                   <Clipboard className="size-4" /> Copy HTML — paste into Gmail
                 </Button>
+
+                <Button
+                  onClick={() => sendEmail(email.subject, email.html)}
+                  className="w-full glow-amber bg-[var(--amber)] text-black hover:bg-[var(--amber)]/90"
+                >
+                  <Send className="size-4" /> Send this one
+                </Button>
+                <p className="font-mono-data text-[10px] leading-relaxed text-muted-foreground">
+                  Copies the HTML to your clipboard, then opens your mail app with the subject and recipient filled in — paste the HTML into the compose body.
+                </p>
 
                 <button
                   type="button"
@@ -2683,23 +2740,6 @@ function NextRowPreview({
         </div>
       </div>
       <div className="space-y-2 rounded-md border border-border-strong/60 bg-surface-2 p-3">
-        {usesAi && (
-          <div className="font-mono-data text-[10px] uppercase tracking-wider">
-            {aiLoading ? (
-              <span className="inline-flex items-center gap-1.5 text-sky-glow">
-                <span className="size-1.5 animate-pulse rounded-full bg-sky-glow" />
-                Generating personal insight…
-              </span>
-            ) : (
-              <span className="text-muted-foreground">
-                AI insight ·{" "}
-                <span className="text-sky-glow normal-case tracking-normal">
-                  {aiInsight || ai.fallback}
-                </span>
-              </span>
-            )}
-          </div>
-        )}
         <div className="font-mono-data text-[11px]">
           <span className="text-muted-foreground">To: </span>
           <span className="text-foreground">{toAddr || <span className="text-destructive">— missing —</span>}</span>
