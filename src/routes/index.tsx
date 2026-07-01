@@ -416,6 +416,10 @@ function scanLinks(html: string): { ok: number; broken: { tag: string; reason: s
 
 const TOKEN_RE = /\{([^{}]+)\}/g;
 
+// Matches a chunk that already starts with a block-level HTML tag, so
+// autoFormatHtml() leaves it as-is instead of wrapping it in a <p>.
+const BLOCK_RE = /^\s*<(p|div|table|thead|tbody|tr|td|th|ul|ol|li|h[1-6]|blockquote|pre|hr|img|a\s)/i;
+
 function expandSpintax(src: string, seed: number): string {
   if (!src || src.indexOf("{") === -1) return src;
   const inner = /\{([^{}]*\|[^{}]*)\}/;
@@ -3313,4 +3317,3 @@ function AnalyticsPanel({
     </>
   );
 }
-
