@@ -454,8 +454,7 @@ function looksLikeHtmlDocument(src: string): boolean {
 function autoFormatHtml(src: string): string {
   if (!src) return src;
   if (looksLikeHtmlDocument(src)) return src;
-  const BLOCK_RE = /^<(div|p|ul|ol|li|h[1-6]|blockquote|pre|section|article|header|footer|nav|aside|figure|table|thead|tbody|tr|td|th|hr|br)\b/i;
-  const chunks = src.split(/\n{2,}/);
+    const chunks = src.split(/\n{2,}/);
   return chunks
     .map((chunk) => {
       const trimmed = chunk.trim();
@@ -496,6 +495,22 @@ function fmtDuration(s: number): string {
   if (s < 60) return `${s}s`;
   if (s < 3600) return `${Math.floor(s / 60)}m ${s % 60}s`;
   return `${Math.floor(s / 3600)}h ${Math.floor((s % 3600) / 60)}m`;
+}
+
+/* ============================================================
+   LEGACY AI SETTINGS TYPE (kept for prop compatibility — 
+   AIPersonalizationPanel removed, but SectionACard and 
+   NextRowPreview still accept this prop shape; it is always
+   passed as a disabled/empty object from Index() now)
+   ============================================================ */
+
+export interface AISettings {
+  enabled: boolean;
+  provider: "gemini" | "openai";
+  apiKey: string;
+  prompt: string;
+  fallback: string;
+  descriptionColumn: string;
 }
 
 /* ============================================================
@@ -2607,35 +2622,8 @@ function NextRowPreview({
   spinSeed: number;
   trackingEnabled: boolean;
 }) {
-  // ---- AI {ai_insight} resolver: fetch when active row exposes a description ----
-  const description = ((row?.[ai.descriptionColumn] ?? "") as string).trim();
-  const usesAi =
-    /\{ai_insight\}/.test(subjectTpl) ||
-    /\{ai_insight\}/.test(bodyTpl) ||
-    /\{ai_insight\}/.test(htmlTpl);
-  const [aiInsight, setAiInsight] = useState<string>("");
-  const [aiLoading, setAiLoading] = useState(false);
-  useEffect(() => {
-    if (!usesAi) { setAiInsight(""); setAiLoading(false); return; }
-    if (!ai.enabled || !ai.apiKey || !description) {
-      setAiInsight(ai.fallback);
-      setAiLoading(false);
-      return;
-    }
-    const ctrl = new AbortController();
-    setAiLoading(true);
-    setAiInsight("");
-    generateAIInsight(ai, description, ctrl.signal)
-      .then((txt) => setAiInsight(txt || ai.fallback))
-      .catch(() => setAiInsight(ai.fallback))
-      .finally(() => setAiLoading(false));
-    return () => ctrl.abort();
-  }, [rowIndex, description, usesAi, ai.enabled, ai.apiKey, ai.provider, ai.prompt, ai.fallback]);
-
-  const extras = useMemo(
-    () => ({ ai_insight: aiLoading ? "…" : (aiInsight || ai.fallback) }),
-    [aiInsight, aiLoading, ai.fallback],
-  );
+  // ai_insight token removed — tokens are now filled purely from CSV columns
+  const extras: Record<string, string> = {};
 
   const rawRecipients = row?.[targetEmailHeader] ?? "";
   const toAddr = cleanEmails(rawRecipients);
