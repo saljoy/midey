@@ -525,11 +525,15 @@ function cleanEmails(raw: string): string {
 }
 
 function buildMailto(to: string, opts: { subject?: string; body?: string; bcc?: string } = {}): string {
-  const params = new URLSearchParams();
-  if (opts.subject) params.set("subject", opts.subject);
-  if (opts.body) params.set("body", opts.body);
-  if (opts.bcc) params.set("bcc", opts.bcc);
-  const q = params.toString();
+  // Deliberately not using URLSearchParams here: it encodes spaces as "+"
+  // (form-encoding convention), but mailto: links need "%20" — mail
+  // clients don't turn "+" back into a space the way a web form would,
+  // so subjects/bodies would show up with "+" between every word.
+  const parts: string[] = [];
+  if (opts.subject) parts.push(`subject=${encodeURIComponent(opts.subject)}`);
+  if (opts.body) parts.push(`body=${encodeURIComponent(opts.body)}`);
+  if (opts.bcc) parts.push(`bcc=${encodeURIComponent(opts.bcc)}`);
+  const q = parts.join("&");
   return `mailto:${encodeURIComponent(to)}${q ? `?${q}` : ""}`;
 }
 
