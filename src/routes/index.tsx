@@ -1271,6 +1271,10 @@ function ResearchMode({
   const [brief, setBrief] = useState("");
   const [approaches, setApproaches] = useState<ApproachItem[]>([]);
   const [selectedApproaches, setSelectedApproaches] = useState<number[]>([]);
+  // When multiple approaches are selected: false = generate one email per
+  // approach (current default), true = blend the selected approaches'
+  // ideas into a single combined email instead.
+  const [combineApproaches, setCombineApproaches] = useState(false);
   const [generatedEmails, setGeneratedEmails] = useState<{ approach: number; title: string; subject: string; plain: string; html: string }[]>([]);
   const [activeEmailTab, setActiveEmailTab] = useState(0);
   const [editingHtml, setEditingHtml] = useState(false);
@@ -1303,6 +1307,7 @@ function ResearchMode({
     setBrief("");
     setApproaches([]);
     setSelectedApproaches([]);
+    setCombineApproaches(false);
     setGeneratedEmails([]);
     setActiveEmailTab(0);
     setEditingHtml(false);
@@ -1354,30 +1359,59 @@ function ResearchMode({
     if (selectedApproaches.length === 0) { toast.error("Select at least one approach"); return; }
     setStage("generatingEmail");
     const emails: typeof generatedEmails = [];
-    for (const num of selectedApproaches) {
-      const approach = approaches.find((a) => a.number === num);
-      if (!approach) continue;
+
+    if (combineApproaches && selectedApproaches.length > 1) {
+      // Blend the selected approaches' ideas into ONE cohesive email,
+      // rather than generating a separate email per approach.
+      const chosen = approaches.filter((a) => selectedApproaches.includes(a.number));
       try {
-        // Step 3: Generate the full email
-        const emailPrompt = `${prompts.email}\n\nResearch Brief:\n${brief}\n\nStep 3: Write the full email using approach #${num}: "${approach.title}". Include subject line. Return it as plain text with "Subject: ..." on the first line, then a blank line, then the email body.`;
+        const approachSummaries = chosen
+          .map((a) => `Approach #${a.number} — "${a.title}"\nWhy it fits: ${a.why}\nTone: ${a.tone}\nHook: "${a.hook}"`)
+          .join("\n\n");
+        const emailPrompt = `${prompts.email}\n\nResearch Brief:\n${brief}\n\nStep 3: I've selected multiple approaches below. Do NOT write them as separate emails and do NOT just stitch them together — write ONE single cohesive email that draws on whichever ideas, angles, or details from each selected approach fit best together. Blend them naturally into one voice and one throughline, dropping anything redundant or contradictory between them.\n\nSelected approaches to blend:\n${approachSummaries}\n\nInclude subject line. Return it as plain text with "Subject: ..." on the first line, then a blank line, then the email body.`;
         const plainResult = await geminiCall(emailPrompt);
 
-        // Extract subject and body
         const lines = plainResult.split("\n");
         const subjectLine = lines.find((l) => l.toLowerCase().startsWith("subject:")) ?? "";
         const subject = subjectLine.replace(/^subject:\s*/i, "").trim();
         const bodyStart = lines.findIndex((l) => l.toLowerCase().startsWith("subject:"));
         const plainBody = lines.slice(bodyStart + 1).join("\n").trim();
 
-        // Step 4: Convert to HTML
         const htmlPrompt = `${prompts.html}\n\nEmail to convert:\n\nSubject: ${subject}\n\n${plainBody}`;
         const htmlResult = await geminiCall(htmlPrompt);
 
-        emails.push({ approach: num, title: approach.title, subject, plain: plainBody, html: htmlResult });
+        const combinedTitle = `Combined: ${chosen.map((a) => a.title).join(" + ")}`;
+        emails.push({ approach: 0, title: combinedTitle, subject, plain: plainBody, html: htmlResult });
       } catch (err) {
-        toast.error(`Approach ${num} failed: ${(err as Error).message}`);
+        toast.error(`Combined email failed: ${(err as Error).message}`);
+      }
+    } else {
+      for (const num of selectedApproaches) {
+        const approach = approaches.find((a) => a.number === num);
+        if (!approach) continue;
+        try {
+          // Step 3: Generate the full email
+          const emailPrompt = `${prompts.email}\n\nResearch Brief:\n${brief}\n\nStep 3: Write the full email using approach #${num}: "${approach.title}". Include subject line. Return it as plain text with "Subject: ..." on the first line, then a blank line, then the email body.`;
+          const plainResult = await geminiCall(emailPrompt);
+
+          // Extract subject and body
+          const lines = plainResult.split("\n");
+          const subjectLine = lines.find((l) => l.toLowerCase().startsWith("subject:")) ?? "";
+          const subject = subjectLine.replace(/^subject:\s*/i, "").trim();
+          const bodyStart = lines.findIndex((l) => l.toLowerCase().startsWith("subject:"));
+          const plainBody = lines.slice(bodyStart + 1).join("\n").trim();
+
+          // Step 4: Convert to HTML
+          const htmlPrompt = `${prompts.html}\n\nEmail to convert:\n\nSubject: ${subject}\n\n${plainBody}`;
+          const htmlResult = await geminiCall(htmlPrompt);
+
+          emails.push({ approach: num, title: approach.title, subject, plain: plainBody, html: htmlResult });
+        } catch (err) {
+          toast.error(`Approach ${num} failed: ${(err as Error).message}`);
+        }
       }
     }
+
     if (emails.length > 0) {
       setGeneratedEmails(emails);
       setActiveEmailTab(0);
@@ -1572,15 +1606,40 @@ function ResearchMode({
               </button>
             );
           })}
+          {selectedApproaches.length > 1 && (
+            <div className="rounded-lg border border-border-strong/60 bg-surface-2 p-2.5 space-y-2">
+              <p className="font-mono-data text-[10px] uppercase tracking-wider text-muted-foreground">
+                {selectedApproaches.length} approaches selected — how should I use them?
+              </p>
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => setCombineApproaches(false)}
+                  className={`flex-1 rounded-md border py-2 px-2 text-left font-mono-data text-[11px] ${!combineApproaches ? "border-sky-glow/60 bg-sky-glow/10 text-sky-glow" : "border-border-strong/60 text-muted-foreground"}`}
+                >
+                  <span className="block font-semibold">Separate emails</span>
+                  <span className="block text-[10px] opacity-80 normal-case">One email per approach, in its own tab</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setCombineApproaches(true)}
+                  className={`flex-1 rounded-md border py-2 px-2 text-left font-mono-data text-[11px] ${combineApproaches ? "border-sky-glow/60 bg-sky-glow/10 text-sky-glow" : "border-border-strong/60 text-muted-foreground"}`}
+                >
+                  <span className="block font-semibold">Blend into one</span>
+                  <span className="block text-[10px] opacity-80 normal-case">Combine the best of each into a single email</span>
+                </button>
+              </div>
+            </div>
+          )}
           <Button
             onClick={generateEmails}
             disabled={selectedApproaches.length === 0 || stage === "generatingEmail"}
             className="w-full glow-sky"
           >
             {stage === "generatingEmail" ? (
-              <><RefreshCw className="size-4 animate-spin" /> Generating {selectedApproaches.length} email{selectedApproaches.length > 1 ? "s" : ""}…</>
+              <><RefreshCw className="size-4 animate-spin" /> Generating {combineApproaches && selectedApproaches.length > 1 ? "combined email" : `${selectedApproaches.length} email${selectedApproaches.length > 1 ? "s" : ""}`}…</>
             ) : (
-              <><PenLine className="size-4" /> Generate {selectedApproaches.length > 0 ? `${selectedApproaches.length} email${selectedApproaches.length > 1 ? "s" : ""}` : "email"}</>
+              <><PenLine className="size-4" /> Generate {selectedApproaches.length === 0 ? "email" : combineApproaches && selectedApproaches.length > 1 ? "combined email" : `${selectedApproaches.length} email${selectedApproaches.length > 1 ? "s" : ""}`}</>
             )}
           </Button>
         </div>
