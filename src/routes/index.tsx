@@ -281,7 +281,11 @@ function loadPrompts() {
    GEMINI API UTILITIES
    ============================================================ */
 
-const GEMINI_BASE = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent";
+// gemini-2.0-flash was deprecated by Google on 2026-03-03 and fully shut
+// down on 2026-06-01 — using it now returns errors that look like quota
+// exhaustion but are really "model no longer exists". gemini-2.5-flash is
+// the current, free-tier-eligible equivalent as of mid-2026.
+const GEMINI_BASE = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent";
 
 async function callGemini(
   keys: ApiKey[],
