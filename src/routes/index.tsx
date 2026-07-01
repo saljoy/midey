@@ -31,7 +31,7 @@ export const Route = createFileRoute("/")({
     ],
   }),
   component: Index,
-}));
+});
 
 /* ============================================================
    TYPES
@@ -3322,3 +3322,4 @@ function AnalyticsPanel({
     </>
   );
 }
+
