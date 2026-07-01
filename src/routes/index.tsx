@@ -11,7 +11,7 @@ import {
   Palette, Highlighter, CornerDownLeft, RotateCcw,
   Menu, X, Settings, Key, CheckCircle, XCircle, AlertCircle,
   Globe, Beaker, ChevronRight, Search, BookOpen, PenLine,
-  Sparkles, RefreshCw, Clipboard,
+  Sparkles, RefreshCw, Clipboard, Download,
 } from "lucide-react";
 import { Plus, ChevronDown, ChevronUp, Shuffle, Activity, ShieldAlert, History, Layers } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -80,6 +80,11 @@ interface PersistedState {
   queueSearchPersisted: string;
   trackingEnabled: boolean;
   homepageMode: HomepageMode;
+  // Row indices (within `rows`, keyed by domainHeader) marked as "done" in
+  // Research Mode — auto-set once an email is generated for that lead, and
+  // manually toggleable. Persists across mode switches and page reloads
+  // via the same localStorage-backed state as everything else.
+  researchDone: Record<number, boolean>;
 }
 
 /* ============================================================
@@ -186,6 +191,27 @@ Requirements:
 - Do NOT add an unsubscribe footer
 - Return ONLY the complete HTML starting with <!DOCTYPE html>, no explanation, no markdown, no backticks`;
 
+const DEFAULT_BLEND_PROMPT = `You're combining multiple approach options into ONE single cold email, not writing them separately and not just stitching them together paragraph by paragraph.
+
+Read through all the selected approaches below — their angles, the specific details from the brief each one leans on, their tone, and their opening hooks. Then write one cohesive email that:
+- Picks the strongest opening hook out of the set, or blends two openings into one if they genuinely complement each other
+- Pulls in whichever specific details (app count, founder background, recent news, product line, etc.) actually strengthen the message, dropping anything redundant between the approaches
+- Keeps a single consistent tone throughout, even if the selected approaches listed different tones — pick the tone that best fits the overall blend
+- Reads like it was written with one clear angle in mind, not like a merged document
+
+Do not label or separate sections by approach number. Do not mention that this is a "combined" or "blended" email. It should read exactly like a single, natural, one-take cold email.`;
+
+const DEFAULT_PLAIN_PROMPT = `Take the email text below and return it as clean plain text, ready to paste directly into an email client's compose window.
+
+- Preserve every paragraph break and the exact line spacing of the signature
+- Do not add any HTML tags, markdown formatting, asterisks, or bullet characters
+- Do not add a subject line — that is handled separately
+- Do not add any explanation, preamble, or notes of your own
+- Return only the raw plain text of the email body, nothing else
+
+Email text:
+[EMAIL_TEXT]`;
+
 /* ============================================================
    DEFAULT STATE
    ============================================================ */
@@ -213,6 +239,7 @@ const DEFAULT_STATE: PersistedState = {
   queueSearchPersisted: "",
   trackingEnabled: false,
   homepageMode: "research",
+  researchDone: {},
 };
 
 function newId() {
@@ -260,20 +287,27 @@ function saveApiKeys(keys: ApiKey[]) {
 }
 
 function loadPrompts() {
-  if (typeof window === "undefined") {
-    return { research: DEFAULT_RESEARCH_PROMPT, email: DEFAULT_EMAIL_PROMPT, html: DEFAULT_HTML_PROMPT };
-  }
+  const defaults = {
+    research: DEFAULT_RESEARCH_PROMPT,
+    email: DEFAULT_EMAIL_PROMPT,
+    html: DEFAULT_HTML_PROMPT,
+    blend: DEFAULT_BLEND_PROMPT,
+    plainFormat: DEFAULT_PLAIN_PROMPT,
+  };
+  if (typeof window === "undefined") return defaults;
   try {
     const raw = localStorage.getItem(PROMPTS_KEY);
-    if (!raw) return { research: DEFAULT_RESEARCH_PROMPT, email: DEFAULT_EMAIL_PROMPT, html: DEFAULT_HTML_PROMPT };
+    if (!raw) return defaults;
     const p = JSON.parse(raw);
     return {
-      research: p.research || DEFAULT_RESEARCH_PROMPT,
-      email: p.email || DEFAULT_EMAIL_PROMPT,
-      html: p.html || DEFAULT_HTML_PROMPT,
+      research: p.research || defaults.research,
+      email: p.email || defaults.email,
+      html: p.html || defaults.html,
+      blend: p.blend || defaults.blend,
+      plainFormat: p.plainFormat || defaults.plainFormat,
     };
   } catch {
-    return { research: DEFAULT_RESEARCH_PROMPT, email: DEFAULT_EMAIL_PROMPT, html: DEFAULT_HTML_PROMPT };
+    return defaults;
   }
 }
 
@@ -556,6 +590,8 @@ function Index() {
     research: DEFAULT_RESEARCH_PROMPT,
     email: DEFAULT_EMAIL_PROMPT,
     html: DEFAULT_HTML_PROMPT,
+    blend: DEFAULT_BLEND_PROMPT,
+    plainFormat: DEFAULT_PLAIN_PROMPT,
   });
 
   // Draggable send button
@@ -947,7 +983,13 @@ function Index() {
               onDismiss={() => setResume(null)}
             />
           )}
-          {state.homepageMode === "research" ? (
+          {/* Both modes stay mounted at all times — only visibility toggles.
+              Conditionally rendering (mount/unmount) here used to wipe out
+              all of Research Mode's in-progress state (selected lead,
+              brief, approaches, generated emails) the instant you switched
+              to Queue mode and back, since React destroys component state
+              on unmount. Hiding with CSS instead preserves it. */}
+          <div className={state.homepageMode === "research" ? "" : "hidden"}>
             <ResearchMode
               rows={state.rows}
               headers={state.headers}
@@ -955,32 +997,39 @@ function Index() {
               geminiCall={geminiCall}
               prompts={prompts}
               trackingEnabled={state.trackingEnabled}
+              doneLeads={state.researchDone}
+              onToggleDone={(idx) =>
+                patch({ researchDone: { ...state.researchDone, [idx]: !state.researchDone[idx] } })
+              }
+              onMarkDone={(idx) => {
+                if (state.researchDone[idx]) return;
+                patch({ researchDone: { ...state.researchDone, [idx]: true } });
+              }}
             />
-          ) : (
-            <div className="space-y-4">
-              <SectionACard
-                state={state}
-                patch={patch}
-                queue={queue}
-                processedCount={processedCount}
-                fireRow={fireRow}
-                skipRow={skipRow}
-                resetRow={resetRow}
-                executeTestHtml={executeHtml}
-                renderedTestHtml={renderedHtml}
-                renderedTestSubject={renderedSubjectB}
-                executeTestPlain={executePlainTest}
-                renderedTestSubjectPlain={renderedSubjectAPreview}
-                sampleRow={sampleRow}
-                activeTemplate={activeTemplate}
-                updateTemplate={updateTemplate}
-                rotation={rotation}
-                resumeTarget={resumeTarget}
-                onConsumeResume={() => setResumeTarget(null)}
-                ai={{ enabled: false, provider: "gemini", apiKey: "", prompt: "", fallback: "", descriptionColumn: "" }}
-              />
-            </div>
-          )}
+          </div>
+          <div className={state.homepageMode === "queue" ? "space-y-4" : "hidden"}>
+            <SectionACard
+              state={state}
+              patch={patch}
+              queue={queue}
+              processedCount={processedCount}
+              fireRow={fireRow}
+              skipRow={skipRow}
+              resetRow={resetRow}
+              executeTestHtml={executeHtml}
+              renderedTestHtml={renderedHtml}
+              renderedTestSubject={renderedSubjectB}
+              executeTestPlain={executePlainTest}
+              renderedTestSubjectPlain={renderedSubjectAPreview}
+              sampleRow={sampleRow}
+              activeTemplate={activeTemplate}
+              updateTemplate={updateTemplate}
+              rotation={rotation}
+              resumeTarget={resumeTarget}
+              onConsumeResume={() => setResumeTarget(null)}
+              ai={{ enabled: false, provider: "gemini", apiKey: "", prompt: "", fallback: "", descriptionColumn: "" }}
+            />
+          </div>
         </DragContext.Provider>
       </main>
     </div>
@@ -1038,6 +1087,7 @@ function GeminiKeyManager({ keys, onChange }: { keys: ApiKey[]; onChange: (updat
   const [newValue, setNewValue] = useState("");
   const [newLabel, setNewLabel] = useState("");
   const [testingAll, setTestingAll] = useState(false);
+  const importInputRef = useRef<HTMLInputElement>(null);
 
   const addKey = () => {
     const v = newValue.trim();
@@ -1052,6 +1102,50 @@ function GeminiKeyManager({ keys, onChange }: { keys: ApiKey[]; onChange: (updat
     onChange((prev) => [...prev, key]);
     setNewValue("");
     setNewLabel("");
+  };
+
+  // One key per line, label in parentheses at the end: "AIza... (Key 1)".
+  // Matches how you'd want to read it back on another browser/device.
+  const exportKeys = () => {
+    if (keys.length === 0) { toast.info("No keys to export yet"); return; }
+    const lines = keys.map((k) => `${k.value} (${k.label})`);
+    const blob = new Blob([lines.join("\n") + "\n"], { type: "text/plain" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "gemini-api-keys.txt";
+    a.click();
+    URL.revokeObjectURL(url);
+    toast.success(`Exported ${keys.length} key${keys.length > 1 ? "s" : ""}`);
+  };
+
+  const importKeys = (file: File) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const text = String(reader.result || "");
+      const lines = text.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+      const existingValues = new Set(keys.map((k) => k.value));
+      const imported: ApiKey[] = [];
+      for (const line of lines) {
+        const match = line.match(/^(.*?)\s*\(([^)]*)\)\s*$/);
+        const value = (match ? match[1] : line).trim();
+        if (!value || existingValues.has(value)) continue;
+        existingValues.add(value);
+        const label = (match?.[2] ?? "").trim() || `Key ${keys.length + imported.length + 1}`;
+        imported.push({
+          id: `key_${Math.random().toString(36).slice(2, 9)}`,
+          label,
+          value,
+          enabled: true,
+          status: "unknown",
+        });
+      }
+      if (imported.length === 0) { toast.info("No new keys found in that file"); return; }
+      onChange((prev) => [...prev, ...imported]);
+      toast.success(`Imported ${imported.length} key${imported.length > 1 ? "s" : ""}`);
+    };
+    reader.onerror = () => toast.error("Could not read that file");
+    reader.readAsText(file);
   };
 
   const testKey = async (id: string) => {
@@ -1093,6 +1187,37 @@ function GeminiKeyManager({ keys, onChange }: { keys: ApiKey[]; onChange: (updat
     <div className="space-y-3">
       <p className="font-mono-data text-[10px] leading-relaxed text-muted-foreground">
         Add multiple Gemini API keys from different Google accounts. The app rotates automatically when one is quota-exhausted. Keys are saved only in your browser.
+      </p>
+
+      <div className="flex gap-2">
+        <button
+          type="button"
+          onClick={exportKeys}
+          className="flex flex-1 items-center justify-center gap-1.5 rounded-md border border-border-strong/60 py-2 font-mono-data text-[11px] text-muted-foreground hover:text-foreground"
+        >
+          <Download className="size-3.5" /> Export keys (.txt)
+        </button>
+        <button
+          type="button"
+          onClick={() => importInputRef.current?.click()}
+          className="flex flex-1 items-center justify-center gap-1.5 rounded-md border border-border-strong/60 py-2 font-mono-data text-[11px] text-muted-foreground hover:text-foreground"
+        >
+          <Upload className="size-3.5" /> Import keys (.txt)
+        </button>
+        <input
+          ref={importInputRef}
+          type="file"
+          accept=".txt,text/plain"
+          className="hidden"
+          onChange={(e) => {
+            const file = e.target.files?.[0];
+            if (file) importKeys(file);
+            e.target.value = "";
+          }}
+        />
+      </div>
+      <p className="font-mono-data text-[9px] leading-relaxed text-muted-foreground">
+        Format: one key per line, label in parentheses — e.g. <span className="text-foreground">AIzaSy... (Key 1)</span>
       </p>
 
       {/* Key list */}
@@ -1178,11 +1303,29 @@ function GeminiKeyManager({ keys, onChange }: { keys: ApiKey[]; onChange: (updat
    PROMPT SETTINGS PANEL
    ============================================================ */
 
+const PROMPT_LABELS: Record<"research" | "email" | "html" | "blend" | "plainFormat", string> = {
+  research: "Research Prompt",
+  email: "Email Writing Prompt",
+  html: "HTML Output Prompt",
+  blend: "Blend Prompt (used when 2+ approaches are combined into one email)",
+  plainFormat: "Plain Text Output Prompt (used when Plain Text mode is selected)",
+};
+
+const PROMPT_DEFAULTS = {
+  research: DEFAULT_RESEARCH_PROMPT,
+  email: DEFAULT_EMAIL_PROMPT,
+  html: DEFAULT_HTML_PROMPT,
+  blend: DEFAULT_BLEND_PROMPT,
+  plainFormat: DEFAULT_PLAIN_PROMPT,
+};
+
+type PromptSet = { research: string; email: string; html: string; blend: string; plainFormat: string };
+
 function PromptSettingsPanel({
   prompts, onChange,
 }: {
-  prompts: { research: string; email: string; html: string };
-  onChange: (p: { research: string; email: string; html: string }) => void;
+  prompts: PromptSet;
+  onChange: (p: PromptSet) => void;
 }) {
   const [local, setLocal] = useState(prompts);
   const [saved, setSaved] = useState(false);
@@ -1196,9 +1339,8 @@ function PromptSettingsPanel({
     setTimeout(() => setSaved(false), 2000);
   };
 
-  const reset = (key: "research" | "email" | "html") => {
-    const defaults = { research: DEFAULT_RESEARCH_PROMPT, email: DEFAULT_EMAIL_PROMPT, html: DEFAULT_HTML_PROMPT };
-    setLocal((p) => ({ ...p, [key]: defaults[key] }));
+  const reset = (key: keyof PromptSet) => {
+    setLocal((p) => ({ ...p, [key]: PROMPT_DEFAULTS[key] }));
     toast.info(`${key} prompt reset to default`);
   };
 
@@ -1208,16 +1350,16 @@ function PromptSettingsPanel({
         Edit the prompts that drive the Research + Email Writer. Changes take effect on the next AI call. Use Reset to restore the original.
       </p>
 
-      {(["research", "email", "html"] as const).map((key) => (
+      {(["research", "email", "blend", "plainFormat", "html"] as const).map((key) => (
         <div key={key} className="space-y-1.5">
-          <div className="flex items-center justify-between">
+          <div className="flex items-center justify-between gap-2">
             <Label className="font-mono-data text-[10px] uppercase tracking-wider text-muted-foreground">
-              {key === "research" ? "Research Prompt" : key === "email" ? "Email Writing Prompt" : "HTML Output Prompt"}
+              {PROMPT_LABELS[key]}
             </Label>
             <button
               type="button"
               onClick={() => reset(key)}
-              className="flex items-center gap-1 font-mono-data text-[10px] text-muted-foreground underline decoration-dotted hover:text-foreground"
+              className="flex shrink-0 items-center gap-1 font-mono-data text-[10px] text-muted-foreground underline decoration-dotted hover:text-foreground"
             >
               <RotateCcw className="size-3" /> Reset
             </button>
@@ -1225,7 +1367,7 @@ function PromptSettingsPanel({
           <Textarea
             value={local[key]}
             onChange={(e) => setLocal((p) => ({ ...p, [key]: e.target.value }))}
-            rows={key === "html" ? 6 : 10}
+            rows={key === "html" || key === "plainFormat" || key === "blend" ? 6 : 10}
             className="font-mono-data text-[11px] leading-relaxed"
             spellCheck={false}
           />
@@ -1253,17 +1395,62 @@ interface ApproachItem {
   hook: string;
 }
 
+interface GeneratedEmail {
+  approach: number;
+  title: string;
+  subject: string;
+  plain: string;
+  html: string;
+  format: "html" | "plain";
+}
+
 type ResearchStage = "idle" | "researching" | "brief" | "generatingApproaches" | "approaches" | "generatingEmail" | "email";
+
+// Saved per-lead so switching between leads (or reloading the page) never
+// forces you to re-spend API calls on a store you've already researched.
+interface LeadCacheEntry {
+  storeInput: string;
+  brief: string;
+  approaches: ApproachItem[];
+  selectedApproaches: number[];
+  combineApproaches: boolean;
+  outputFormat: "html" | "plain";
+  generatedEmails: GeneratedEmail[];
+  savedAt: string;
+}
+
+const LEAD_CACHE_KEY = "midey.research.leadCache.v1";
+
+function loadLeadCache(): Record<string, LeadCacheEntry> {
+  if (typeof window === "undefined") return {};
+  try {
+    const raw = localStorage.getItem(LEAD_CACHE_KEY);
+    if (!raw) return {};
+    return JSON.parse(raw) as Record<string, LeadCacheEntry>;
+  } catch { return {}; }
+}
+
+function stageForCacheEntry(entry: LeadCacheEntry | undefined): ResearchStage {
+  if (!entry) return "idle";
+  if (entry.generatedEmails.length > 0) return "email";
+  if (entry.approaches.length > 0) return "approaches";
+  if (entry.brief) return "brief";
+  return "idle";
+}
 
 function ResearchMode({
   rows, headers, domainHeader, geminiCall, prompts, trackingEnabled,
+  doneLeads, onToggleDone, onMarkDone,
 }: {
   rows: Row[];
   headers: string[];
   domainHeader: string;
   geminiCall: (prompt: string, useWebSearch?: boolean) => Promise<string>;
-  prompts: { research: string; email: string; html: string };
+  prompts: PromptSet;
   trackingEnabled: boolean;
+  doneLeads: Record<number, boolean>;
+  onToggleDone: (idx: number) => void;
+  onMarkDone: (idx: number) => void;
 }) {
   const [selectedLeadIdx, setSelectedLeadIdx] = useState<number | null>(null);
   const [manualInput, setManualInput] = useState("");
@@ -1275,10 +1462,27 @@ function ResearchMode({
   // approach (current default), true = blend the selected approaches'
   // ideas into a single combined email instead.
   const [combineApproaches, setCombineApproaches] = useState(false);
-  const [generatedEmails, setGeneratedEmails] = useState<{ approach: number; title: string; subject: string; plain: string; html: string }[]>([]);
+  // Whether the generated email is written as HTML (with live preview +
+  // HTML conversion step) or as plain text (mailto body prefilled directly).
+  const [outputFormat, setOutputFormat] = useState<"html" | "plain">("html");
+  const [generatedEmails, setGeneratedEmails] = useState<GeneratedEmail[]>([]);
   const [activeEmailTab, setActiveEmailTab] = useState(0);
   const [editingHtml, setEditingHtml] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
+
+  // Per-lead cache: research/approaches/emails already generated for a
+  // given store, persisted to localStorage so nothing needs re-fetching
+  // just because you switched leads, switched to Queue mode, or reloaded.
+  const [leadCache, setLeadCache] = useState<Record<string, LeadCacheEntry>>(() => loadLeadCache());
+  useEffect(() => {
+    try { localStorage.setItem(LEAD_CACHE_KEY, JSON.stringify(leadCache)); } catch {}
+  }, [leadCache]);
+
+  const leadKey = useMemo(() => {
+    if (selectedLeadIdx !== null) return `row:${selectedLeadIdx}`;
+    const trimmed = manualInput.trim().toLowerCase();
+    return trimmed ? `manual:${trimmed}` : null;
+  }, [selectedLeadIdx, manualInput]);
 
   const storeInput = useMemo(() => {
     if (selectedLeadIdx !== null && rows[selectedLeadIdx]) {
@@ -1308,15 +1512,55 @@ function ResearchMode({
     setApproaches([]);
     setSelectedApproaches([]);
     setCombineApproaches(false);
+    setOutputFormat("html");
     setGeneratedEmails([]);
     setActiveEmailTab(0);
     setEditingHtml(false);
   };
 
+  // Loads a saved lead's research/approaches/emails from cache instead of
+  // starting from scratch — this is what lets you click back into a lead
+  // you've already worked through without spending another API call.
+  const hydrateFromCache = (entry: LeadCacheEntry) => {
+    setBrief(entry.brief);
+    setApproaches(entry.approaches);
+    setSelectedApproaches(entry.selectedApproaches);
+    setCombineApproaches(entry.combineApproaches);
+    setOutputFormat(entry.outputFormat ?? "html");
+    setGeneratedEmails(entry.generatedEmails);
+    setActiveEmailTab(0);
+    setEditingHtml(false);
+    setStage(stageForCacheEntry(entry));
+  };
+
   const selectLead = (idx: number) => {
     setSelectedLeadIdx(idx);
     setManualInput("");
-    reset();
+    const cached = leadCache[`row:${idx}`];
+    if (cached) hydrateFromCache(cached);
+    else reset();
+  };
+
+  // Merges a partial update into the cache entry for whichever lead is
+  // currently active, keyed by row index or by the manually typed store
+  // name if no CSV lead is selected.
+  const saveToCache = (partial: Partial<LeadCacheEntry>) => {
+    if (!leadKey) return;
+    setLeadCache((prev) => {
+      const existing = prev[leadKey];
+      const next: LeadCacheEntry = {
+        storeInput,
+        brief: existing?.brief ?? "",
+        approaches: existing?.approaches ?? [],
+        selectedApproaches: existing?.selectedApproaches ?? [],
+        combineApproaches: existing?.combineApproaches ?? false,
+        outputFormat: existing?.outputFormat ?? "html",
+        generatedEmails: existing?.generatedEmails ?? [],
+        savedAt: new Date().toISOString(),
+        ...partial,
+      };
+      return { ...prev, [leadKey]: next };
+    });
   };
 
   const runResearch = async () => {
@@ -1331,6 +1575,8 @@ function ResearchMode({
       const result = await geminiCall(`${prompts.research}\n\nStore to research: ${input}`, true);
       setBrief(result);
       setStage("brief");
+      // Fresh research invalidates any prior approaches/emails for this lead.
+      saveToCache({ brief: result, approaches: [], selectedApproaches: [], generatedEmails: [] });
     } catch (err) {
       toast.error((err as Error).message);
       setStage("idle");
@@ -1349,16 +1595,42 @@ function ResearchMode({
       const parsed = JSON.parse(jsonMatch[0]) as ApproachItem[];
       setApproaches(parsed);
       setStage("approaches");
+      saveToCache({ approaches: parsed, selectedApproaches: [], generatedEmails: [] });
     } catch (err) {
       toast.error(`Failed to generate approaches: ${(err as Error).message}`);
       setStage("brief");
     }
   };
 
+  // Runs the writing prompt, then either the HTML conversion prompt or the
+  // plain-text formatting prompt depending on outputFormat, and returns a
+  // finished GeneratedEmail.
+  const writeAndFormatEmail = async (writingPrompt: string, approachNum: number, title: string): Promise<GeneratedEmail> => {
+    const plainResult = await geminiCall(writingPrompt);
+    const lines = plainResult.split("\n");
+    const subjectLine = lines.find((l) => l.toLowerCase().startsWith("subject:")) ?? "";
+    const subject = subjectLine.replace(/^subject:\s*/i, "").trim();
+    const bodyStart = lines.findIndex((l) => l.toLowerCase().startsWith("subject:"));
+    const plainBody = lines.slice(bodyStart + 1).join("\n").trim();
+
+    if (outputFormat === "plain") {
+      const hasPlaceholder = prompts.plainFormat.includes("[EMAIL_TEXT]");
+      const plainPrompt = hasPlaceholder
+        ? prompts.plainFormat.replace("[EMAIL_TEXT]", plainBody)
+        : `${prompts.plainFormat}\n\n${plainBody}`;
+      const formatted = await geminiCall(plainPrompt);
+      return { approach: approachNum, title, subject, plain: formatted, html: "", format: "plain" };
+    }
+
+    const htmlPrompt = `${prompts.html}\n\nEmail to convert:\n\nSubject: ${subject}\n\n${plainBody}`;
+    const htmlResult = await geminiCall(htmlPrompt);
+    return { approach: approachNum, title, subject, plain: plainBody, html: htmlResult, format: "html" };
+  };
+
   const generateEmails = async () => {
     if (selectedApproaches.length === 0) { toast.error("Select at least one approach"); return; }
     setStage("generatingEmail");
-    const emails: typeof generatedEmails = [];
+    const emails: GeneratedEmail[] = [];
 
     if (combineApproaches && selectedApproaches.length > 1) {
       // Blend the selected approaches' ideas into ONE cohesive email,
@@ -1368,20 +1640,9 @@ function ResearchMode({
         const approachSummaries = chosen
           .map((a) => `Approach #${a.number} — "${a.title}"\nWhy it fits: ${a.why}\nTone: ${a.tone}\nHook: "${a.hook}"`)
           .join("\n\n");
-        const emailPrompt = `${prompts.email}\n\nResearch Brief:\n${brief}\n\nStep 3: I've selected multiple approaches below. Do NOT write them as separate emails and do NOT just stitch them together — write ONE single cohesive email that draws on whichever ideas, angles, or details from each selected approach fit best together. Blend them naturally into one voice and one throughline, dropping anything redundant or contradictory between them.\n\nSelected approaches to blend:\n${approachSummaries}\n\nInclude subject line. Return it as plain text with "Subject: ..." on the first line, then a blank line, then the email body.`;
-        const plainResult = await geminiCall(emailPrompt);
-
-        const lines = plainResult.split("\n");
-        const subjectLine = lines.find((l) => l.toLowerCase().startsWith("subject:")) ?? "";
-        const subject = subjectLine.replace(/^subject:\s*/i, "").trim();
-        const bodyStart = lines.findIndex((l) => l.toLowerCase().startsWith("subject:"));
-        const plainBody = lines.slice(bodyStart + 1).join("\n").trim();
-
-        const htmlPrompt = `${prompts.html}\n\nEmail to convert:\n\nSubject: ${subject}\n\n${plainBody}`;
-        const htmlResult = await geminiCall(htmlPrompt);
-
+        const emailPrompt = `${prompts.email}\n\nResearch Brief:\n${brief}\n\nStep 3: ${prompts.blend}\n\nSelected approaches to blend:\n${approachSummaries}\n\nInclude subject line. Return it as plain text with "Subject: ..." on the first line, then a blank line, then the email body.`;
         const combinedTitle = `Combined: ${chosen.map((a) => a.title).join(" + ")}`;
-        emails.push({ approach: 0, title: combinedTitle, subject, plain: plainBody, html: htmlResult });
+        emails.push(await writeAndFormatEmail(emailPrompt, 0, combinedTitle));
       } catch (err) {
         toast.error(`Combined email failed: ${(err as Error).message}`);
       }
@@ -1390,22 +1651,8 @@ function ResearchMode({
         const approach = approaches.find((a) => a.number === num);
         if (!approach) continue;
         try {
-          // Step 3: Generate the full email
           const emailPrompt = `${prompts.email}\n\nResearch Brief:\n${brief}\n\nStep 3: Write the full email using approach #${num}: "${approach.title}". Include subject line. Return it as plain text with "Subject: ..." on the first line, then a blank line, then the email body.`;
-          const plainResult = await geminiCall(emailPrompt);
-
-          // Extract subject and body
-          const lines = plainResult.split("\n");
-          const subjectLine = lines.find((l) => l.toLowerCase().startsWith("subject:")) ?? "";
-          const subject = subjectLine.replace(/^subject:\s*/i, "").trim();
-          const bodyStart = lines.findIndex((l) => l.toLowerCase().startsWith("subject:"));
-          const plainBody = lines.slice(bodyStart + 1).join("\n").trim();
-
-          // Step 4: Convert to HTML
-          const htmlPrompt = `${prompts.html}\n\nEmail to convert:\n\nSubject: ${subject}\n\n${plainBody}`;
-          const htmlResult = await geminiCall(htmlPrompt);
-
-          emails.push({ approach: num, title: approach.title, subject, plain: plainBody, html: htmlResult });
+          emails.push(await writeAndFormatEmail(emailPrompt, num, approach.title));
         } catch (err) {
           toast.error(`Approach ${num} failed: ${(err as Error).message}`);
         }
@@ -1416,6 +1663,8 @@ function ResearchMode({
       setGeneratedEmails(emails);
       setActiveEmailTab(0);
       setStage("email");
+      saveToCache({ generatedEmails: emails, selectedApproaches, combineApproaches, outputFormat });
+      if (selectedLeadIdx !== null) onMarkDone(selectedLeadIdx);
     } else {
       setStage("approaches");
     }
@@ -1432,6 +1681,13 @@ function ResearchMode({
     } catch (e) { toast.error(`Clipboard failed: ${(e as Error).message}`); }
   };
 
+  const copyPlain = async (text: string) => {
+    try {
+      await navigator.clipboard.writeText(text);
+      toast.success("Text copied to clipboard");
+    } catch (e) { toast.error(`Clipboard failed: ${(e as Error).message}`); }
+  };
+
   // Copies the HTML to clipboard (same as Copy HTML) then opens a mailto:
   // with the subject and recipient prefilled, so the only remaining step
   // is pasting the already-copied HTML into the compose window body.
@@ -1439,6 +1695,13 @@ function ResearchMode({
     await copyHtml(html);
     const href = buildMailto(contactEmail, { subject });
     setTimeout(() => { window.location.href = href; }, 300);
+  };
+
+  // Plain text can actually go straight into the mailto: body param —
+  // no clipboard round trip needed, the compose window opens fully filled in.
+  const sendPlainEmail = (subject: string, body: string) => {
+    const href = buildMailto(contactEmail, { subject, body });
+    window.location.href = href;
   };
 
   return (
@@ -1464,17 +1727,34 @@ function ResearchMode({
             {filteredRows.slice(0, 200).map((i) => {
               const row = rows[i];
               const domain = row[domainHeader] || Object.values(row)[0] || `Row ${i}`;
+              const isDone = !!doneLeads[i];
+              const hasCache = !!leadCache[`row:${i}`];
               return (
-                <button
+                <div
                   key={i}
-                  type="button"
-                  onClick={() => selectLead(i)}
-                  className={`flex w-full items-center gap-2 px-3 py-2 text-left hover:bg-surface-2 ${selectedLeadIdx === i ? "bg-sky-glow/10 border-l-2 border-sky-glow" : ""}`}
+                  className={`flex w-full items-center gap-2 px-3 py-2 hover:bg-surface-2 ${selectedLeadIdx === i ? "bg-sky-glow/10 border-l-2 border-sky-glow" : ""}`}
                 >
-                  <Globe className="size-3 text-muted-foreground shrink-0" />
-                  <span className="min-w-0 flex-1 font-mono-data text-xs text-foreground truncate">{domain}</span>
-                  <ChevronRight className="size-3 text-muted-foreground shrink-0" />
-                </button>
+                  <button type="button" onClick={() => selectLead(i)} className="flex min-w-0 flex-1 items-center gap-2 text-left">
+                    <Globe className="size-3 text-muted-foreground shrink-0" />
+                    <span className="min-w-0 flex-1 font-mono-data text-xs text-foreground truncate">{domain}</span>
+                    {hasCache && (
+                      <span className="shrink-0 font-mono-data text-[9px] uppercase tracking-wider text-sky-glow" title="Saved — opens without using API">
+                        saved
+                      </span>
+                    )}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={(e) => { e.stopPropagation(); onToggleDone(i); }}
+                    title={isDone ? "Marked done — tap to unmark" : "Mark this lead as done"}
+                    className={`flex size-5 shrink-0 items-center justify-center rounded-full border transition-colors ${
+                      isDone ? "border-emerald-500/60 bg-emerald-500/15 text-emerald-400" : "border-border-strong/60 text-muted-foreground/50 hover:text-muted-foreground"
+                    }`}
+                  >
+                    <CheckCircle className="size-3.5" />
+                  </button>
+                  <ChevronRight className="size-3 text-muted-foreground shrink-0" onClick={() => selectLead(i)} />
+                </div>
               );
             })}
             {filteredRows.length === 0 && (
@@ -1530,9 +1810,16 @@ function ResearchMode({
             <span className="flex items-center gap-2 font-mono-data text-[11px] uppercase tracking-wider text-muted-foreground">
               <BookOpen className="size-3.5 text-sky-glow" /> Research Brief
             </span>
-            <button type="button" onClick={reset} className="font-mono-data text-[10px] text-muted-foreground underline decoration-dotted hover:text-foreground">
-              Start over
-            </button>
+            <div className="flex items-center gap-3">
+              {stage !== "generatingApproaches" && (
+                <button type="button" onClick={runResearch} className="font-mono-data text-[10px] text-muted-foreground underline decoration-dotted hover:text-foreground">
+                  Re-research
+                </button>
+              )}
+              <button type="button" onClick={reset} className="font-mono-data text-[10px] text-muted-foreground underline decoration-dotted hover:text-foreground">
+                Start over
+              </button>
+            </div>
           </div>
           <div className="p-4">
             <div className="prose prose-sm prose-invert max-w-none">
@@ -1563,9 +1850,20 @@ function ResearchMode({
             <p className="font-mono-data text-[11px] uppercase tracking-wider text-muted-foreground">
               Choose your angle(s)
             </p>
-            <p className="font-mono-data text-[10px] text-muted-foreground">
-              {selectedApproaches.length} selected
-            </p>
+            <div className="flex items-center gap-3">
+              {generatedEmails.length > 0 && stage === "approaches" && (
+                <button
+                  type="button"
+                  onClick={() => setStage("email")}
+                  className="font-mono-data text-[10px] text-sky-glow underline decoration-dotted hover:text-sky-glow/80"
+                >
+                  ← Back to email{generatedEmails.length > 1 ? "s" : ""}
+                </button>
+              )}
+              <p className="font-mono-data text-[10px] text-muted-foreground">
+                {selectedApproaches.length} selected
+              </p>
+            </div>
           </div>
           {approaches.map((a) => {
             const selected = selectedApproaches.includes(a.number);
@@ -1631,6 +1929,29 @@ function ResearchMode({
               </div>
             </div>
           )}
+          <div className="rounded-lg border border-border-strong/60 bg-surface-2 p-2.5 space-y-2">
+            <p className="font-mono-data text-[10px] uppercase tracking-wider text-muted-foreground">
+              Output format
+            </p>
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={() => setOutputFormat("plain")}
+                className={`flex-1 rounded-md border py-2 px-2 text-left font-mono-data text-[11px] ${outputFormat === "plain" ? "border-sky-glow/60 bg-sky-glow/10 text-sky-glow" : "border-border-strong/60 text-muted-foreground"}`}
+              >
+                <span className="block font-semibold">Plain text</span>
+                <span className="block text-[10px] opacity-80 normal-case">No HTML — mailto opens with the body already filled in</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setOutputFormat("html")}
+                className={`flex-1 rounded-md border py-2 px-2 text-left font-mono-data text-[11px] ${outputFormat === "html" ? "border-sky-glow/60 bg-sky-glow/10 text-sky-glow" : "border-border-strong/60 text-muted-foreground"}`}
+              >
+                <span className="block font-semibold">HTML</span>
+                <span className="block text-[10px] opacity-80 normal-case">Styled email, live preview, copy HTML to paste in</span>
+              </button>
+            </div>
+          </div>
           <Button
             onClick={generateEmails}
             disabled={selectedApproaches.length === 0 || stage === "generatingEmail"}
@@ -1708,59 +2029,90 @@ function ResearchMode({
                   />
                 </div>
 
-                <div className="flex gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setEditingHtml(false)}
-                    className={`flex-1 rounded-md border py-1.5 font-mono-data text-[11px] ${!editingHtml ? "border-sky-glow/60 bg-sky-glow/10 text-sky-glow" : "border-border-strong/60 text-muted-foreground"}`}
-                  >
-                    Preview
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setEditingHtml(true)}
-                    className={`flex-1 rounded-md border py-1.5 font-mono-data text-[11px] ${editingHtml ? "border-sky-glow/60 bg-sky-glow/10 text-sky-glow" : "border-border-strong/60 text-muted-foreground"}`}
-                  >
-                    Edit HTML
-                  </button>
-                </div>
-
-                {editingHtml ? (
-                  <Textarea
-                    value={email.html}
-                    onChange={(e) => {
-                      const newHtml = e.target.value;
-                      setGeneratedEmails((prev) => prev.map((em, i) => i === activeEmailTab ? { ...em, html: newHtml } : em));
-                    }}
-                    rows={12}
-                    className="font-mono-data text-[11px] leading-relaxed"
-                    spellCheck={false}
-                  />
-                ) : (
-                  <div className="overflow-hidden rounded-lg border border-border-strong/60 bg-white">
-                    <iframe
-                      srcDoc={`<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head><body style="margin:0;padding:0">${email.html}</body></html>`}
-                      className="w-full"
-                      style={{ height: "400px", border: "none" }}
-                      title="Email preview"
-                      sandbox="allow-same-origin"
+                {email.format === "plain" ? (
+                  <>
+                    <Textarea
+                      value={email.plain}
+                      onChange={(e) => {
+                        const newPlain = e.target.value;
+                        setGeneratedEmails((prev) => prev.map((em, i) => i === activeEmailTab ? { ...em, plain: newPlain } : em));
+                      }}
+                      rows={12}
+                      className="font-sans text-sm leading-relaxed"
+                      spellCheck
                     />
-                  </div>
+
+                    <Button onClick={() => copyPlain(email.plain)} className="w-full glow-sky">
+                      <Clipboard className="size-4" /> Copy text
+                    </Button>
+
+                    <Button
+                      onClick={() => sendPlainEmail(email.subject, email.plain)}
+                      className="w-full glow-amber bg-[var(--amber)] text-black hover:bg-[var(--amber)]/90"
+                    >
+                      <Send className="size-4" /> Send this one
+                    </Button>
+                    <p className="font-mono-data text-[10px] leading-relaxed text-muted-foreground">
+                      Opens your mail app with the subject, recipient, and body all already filled in — plain text mailto links can carry the body directly.
+                    </p>
+                  </>
+                ) : (
+                  <>
+                    <div className="flex gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setEditingHtml(false)}
+                        className={`flex-1 rounded-md border py-1.5 font-mono-data text-[11px] ${!editingHtml ? "border-sky-glow/60 bg-sky-glow/10 text-sky-glow" : "border-border-strong/60 text-muted-foreground"}`}
+                      >
+                        Preview
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setEditingHtml(true)}
+                        className={`flex-1 rounded-md border py-1.5 font-mono-data text-[11px] ${editingHtml ? "border-sky-glow/60 bg-sky-glow/10 text-sky-glow" : "border-border-strong/60 text-muted-foreground"}`}
+                      >
+                        Edit HTML
+                      </button>
+                    </div>
+
+                    {editingHtml ? (
+                      <Textarea
+                        value={email.html}
+                        onChange={(e) => {
+                          const newHtml = e.target.value;
+                          setGeneratedEmails((prev) => prev.map((em, i) => i === activeEmailTab ? { ...em, html: newHtml } : em));
+                        }}
+                        rows={12}
+                        className="font-mono-data text-[11px] leading-relaxed"
+                        spellCheck={false}
+                      />
+                    ) : (
+                      <div className="overflow-hidden rounded-lg border border-border-strong/60 bg-white">
+                        <iframe
+                          srcDoc={`<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head><body style="margin:0;padding:0">${email.html}</body></html>`}
+                          className="w-full"
+                          style={{ height: "400px", border: "none" }}
+                          title="Email preview"
+                          sandbox="allow-same-origin"
+                        />
+                      </div>
+                    )}
+
+                    <Button onClick={() => copyHtml(email.html)} className="w-full glow-sky">
+                      <Clipboard className="size-4" /> Copy HTML — paste into Gmail
+                    </Button>
+
+                    <Button
+                      onClick={() => sendEmail(email.subject, email.html)}
+                      className="w-full glow-amber bg-[var(--amber)] text-black hover:bg-[var(--amber)]/90"
+                    >
+                      <Send className="size-4" /> Send this one
+                    </Button>
+                    <p className="font-mono-data text-[10px] leading-relaxed text-muted-foreground">
+                      Copies the HTML to your clipboard, then opens your mail app with the subject and recipient filled in — paste the HTML into the compose body.
+                    </p>
+                  </>
                 )}
-
-                <Button onClick={() => copyHtml(email.html)} className="w-full glow-sky">
-                  <Clipboard className="size-4" /> Copy HTML — paste into Gmail
-                </Button>
-
-                <Button
-                  onClick={() => sendEmail(email.subject, email.html)}
-                  className="w-full glow-amber bg-[var(--amber)] text-black hover:bg-[var(--amber)]/90"
-                >
-                  <Send className="size-4" /> Send this one
-                </Button>
-                <p className="font-mono-data text-[10px] leading-relaxed text-muted-foreground">
-                  Copies the HTML to your clipboard, then opens your mail app with the subject and recipient filled in — paste the HTML into the compose body.
-                </p>
 
                 <button
                   type="button"
