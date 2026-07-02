@@ -293,9 +293,19 @@ function loadPrompts() {
     const raw = localStorage.getItem(PROMPTS_KEY);
     if (!raw) return defaults;
     const p = JSON.parse(raw);
+    // The Email Writing Prompt used to end with a "Workflow" step that told
+    // the model to return a JSON array of approach options instead of a
+    // finished email — that stage no longer exists. If a saved prompt still
+    // carries that instruction, it's a leftover from before the flow
+    // simplified, not something you deliberately wrote, so auto-replace it
+    // with the current one-shot default rather than silently keeping the
+    // stale behavior forever.
+    const looksLikeOldApproachPrompt =
+      typeof p.email === "string" &&
+      (/return\s+only\s+a\s+valid\s+json\s+array/i.test(p.email) || /"number":\s*integer/i.test(p.email));
     return {
       research: p.research || defaults.research,
-      email: p.email || defaults.email,
+      email: looksLikeOldApproachPrompt ? defaults.email : (p.email || defaults.email),
       html: p.html || defaults.html,
       plainFormat: p.plainFormat || defaults.plainFormat,
     };
