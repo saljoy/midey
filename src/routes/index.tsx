@@ -102,9 +102,9 @@ const PROMPTS_KEY = "midey.prompts.v1";
    DEFAULT PROMPTS
    ============================================================ */
 
-const DEFAULT_RESEARCH_PROMPT = `I'm going to give you a Shopify store name or link. I want you to research this store and its ownership using web search, and give me a clear, organized brief that helps me understand the business and the person behind it before I reach out to them.
+const DEFAULT_RESEARCH_PROMPT = `I'm going to give you a Shopify store name or link. Research this store and its ownership using web search, and give me a clear, organized brief that helps me understand the business and the person behind it before I reach out to them.
 
-Please do the following:
+Do the following:
 
 Step 1: Identify the key person
 Find the founder, owner, or someone with strong administrative or decision making power in the business (CEO, founder, head of operations, etc). Prioritize whoever appears to be the main decision maker.
@@ -112,7 +112,7 @@ Find the founder, owner, or someone with strong administrative or decision makin
 Step 2: Find contact details
 Search for their business email or any publicly available contact information (this could be on the store's About or Contact page, LinkedIn, press articles, podcast features, interviews, or business directories).
 
-Important: my goal is to reach the actual decision maker, not a generic inbox. Do not settle for or default to generic addresses like info@, support@, hello@, sales@, or a general contact form, even if those are the easiest to find. Only list a generic address as a last resort, and clearly flag it as generic rather than direct, so I know not to rely on it.
+Important: the goal is to reach the actual decision maker, not a generic inbox. Do not settle for or default to generic addresses like info@, support@, hello@, sales@, or a general contact form, even if those are the easiest to find. Only list a generic address as a last resort, and clearly flag it as generic rather than direct.
 
 If you find a direct email tied to the founder or decision maker, list it. If you can only find a likely email format (e.g. firstname@storedomain.com) based on common patterns, mention that it's inferred, not confirmed. Never guess private or personal information that isn't publicly available.
 
@@ -125,7 +125,7 @@ Search for recent, relevant, and noteworthy information including:
 - Any pain points or signals that hint at what they might be struggling with (e.g. rapid growth, lots of apps installed, recent funding, complaints, hiring activity, etc)
 
 Step 4: Summarize it clearly
-Give me a short, well organized brief (not overly long) under these sections:
+Give a short, well organized brief (not overly long) under these sections:
 - Who they are
 - What I found about the business
 - Recent or noteworthy updates
@@ -136,46 +136,51 @@ Use your search tool actively throughout this process rather than relying on exi
 
 const DEFAULT_EMAIL_PROMPT = `I'm going to give you details about a Shopify store, its founder/owner, and/or recent news about them. Use this to write a short, highly personalized cold outreach message from Ayomide (also known as Midey) at Phoenix Agency, rooted in these core themes (don't use them all as rigid sections, weave them naturally based on what fits the specific lead):
 
-1. Empathy and recognition — Acknowledge the real overwhelm of running a Shopify store (juggling apps, costs, customer queries, day to day operations). Validate that they're likely overworked and stretched thin.
+1. Empathy & recognition — Acknowledge the real overwhelm of running a Shopify store (juggling apps, costs, customer queries, day to day operations). Validate that they're likely overworked and stretched thin.
 
 2. Cost reduction, no new expense — Make clear we're not pitching another subscription or tool to add to their stack. Reference the hidden costs of redundant apps, subscriptions, or manual work that could be eliminated.
 
-3. Automation and simplification — Frame the solution as consolidating and automating what's currently manual and repetitive, ideally something built once rather than another recurring cost.
+3. Automation & simplification — Frame the solution as consolidating and automating what's currently manual and repetitive, ideally something built once rather than another recurring cost.
 
-4. Freedom and time recovery — Tie this back to giving them time back for the things that actually matter: product creation, growth, or simply their life outside the business. Introduce the idea of the "Chaos Tax", the hidden cost of disorganization and inefficiency, where relevant.
+4. Freedom & time recovery — Tie this back to giving them time back for the things that actually matter: product creation, growth, or simply their life outside the business. Introduce the idea of the "Chaos Tax", the hidden cost of disorganization and inefficiency, where relevant.
 
 5. Low pressure, no obligation — Make it clear there's zero commitment. We're not pitching upfront, just sharing something we noticed and offering to show them, nothing more.
 
-6. Personalization and credibility — Use their name and store name, and reference something specific about their store (recent news, product line, design, founder background, etc.) that proves we actually looked at their business before reaching out.
+6. Personalization & credibility — Use their name and store name, and reference something specific about their store (recent news, product line, design, founder background, etc.) that proves we actually looked at their business before reaching out.
 
-Voice and framing requirement:
+Voice and framing requirement (important):
 Write from "we" (Phoenix Agency), never "I". The message should stay centered on the recipient and their store, not on us or our agency. Keep any mention of Phoenix Agency brief and only where it adds credibility, never as the focus of a sentence. When transitioning into explaining the solution, use a short phrase like "what we do at Phoenix is help merchants like you..." or a natural variation of it, to establish agency prowess before going into specifics. Outside of that one transition phrase, the message should read like it's about them and what we noticed about their store, not about what we do or who we are.
 
-Infrastructure paragraph requirement:
-After the personalized opening, include one detailed paragraph explaining how the solution actually works, written specifically around what was found in the store's details. This paragraph must clearly communicate, in this order, but in natural flowing language and not as a list:
-- We do not hand over a system for them to manage. We build the automation directly into their store.
-- It is built using Shopify's own free native tools, such as Shopify Flow and other built in features that match what their specific store needs.
-- Once it is built and set up, it runs entirely on its own and does not require our input or anyone else's to keep working.
-- Because it runs on native Shopify tools, most of the external apps and subscriptions currently in use can be removed, since those functions can now be handled for free natively.
-- Because everything runs directly from Shopify itself, the store stays fast, stable, and efficient.
+Infrastructure paragraph requirement (important):
+After the personalized opening, include one detailed paragraph explaining how the solution actually works, written specifically around what was found in the store's details (for example, if they run many sub brands or storefronts, focus on how automation ties those operations together, if they seem to have too many apps, focus on consolidation). This paragraph must clearly communicate, in this order, but in natural flowing language and not as a list:
 
-Tone and language requirements:
+- We do not hand over a system for them to manage. We build the automation directly into their store.
+- It is built using Shopify's own free native tools, such as Shopify Flow and other built in features that match what their specific store needs (mention the relevant native feature if the store details suggest one, e.g. inventory tracking, order tagging, customer notifications).
+- Once it is built and set up, it runs entirely on its own and does not require our input or anyone else's to keep working.
+- Because it runs on native Shopify tools, most of the external apps and subscriptions currently in use can be removed, since those functions can now be handled for free natively, meaning no more subscription cost tied to them.
+- Because everything runs directly from Shopify itself, the store stays fast, stable, and efficient, since there are no extra third party apps slowing it down.
+
+This paragraph should sound like a natural continuation of the message, written in the same human, simple tone as the rest, not like a feature list or technical breakdown.
+
+Tone & language requirements:
 - The message must feel highly human, like it was genuinely typed by a real person who cares, not AI generated or templated.
 - Do not use hyphens or em dashes anywhere in the message.
-- Keep it formal enough to be taken seriously by a business owner, but the English must be simple and easy to understand.
+- Keep it formal enough to be taken seriously by a business owner, but the English must be simple and easy to understand, the kind a teenager could read and fully grasp. Avoid big or scholarly words, avoid corporate jargon, avoid overly polished phrasing.
 - Conversational tone, not salesy, not robotic, no generic compliments.
 - Because of the added infrastructure paragraph, the message can run longer than a typical cold email, but should stay under 220 words total and still feel tight and purposeful, not bloated or repetitive.
 - End with ONE clear, low friction CTA: asking if they would like us to send over a 60 second video walking through what we found and how this could work for their store. Frame it as a casual reply (yes or no), not a meeting or call.
-- Sign off with "Ayo Midey / Growth Specialist | Phoenix Agency / Helping E-commerce Brands & Authors Scale"
+- Sign off with:
 
-Workflow:
-Step 2: Once I paste the details, do not write the message yet. Instead, analyze the details and give me 4 different possible approaches I could open the message with. Return ONLY a valid JSON array with no other text, no markdown, no backticks. Each object must have exactly these fields:
-- "number": integer 1 to 4
-- "title": short angle name (3 to 6 words)
-- "why": exactly 2 sentences explaining why this angle fits THIS specific lead based on the research brief, referencing a specific detail found
-- "bestFor": one line describing what type of founder this approach works best on
-- "tone": exactly two words (e.g. "Empathetic, practical")
-- "hook": the actual opening sentence or very close to it, so the tone is felt before committing`;
+Ayo Midey
+Growth Specialist | Phoenix Agency
+Helping E-commerce Brands & Authors Scale
+
+(You can create a similar signature in this style if it fits better.)
+
+Angle selection (internal, do not show your reasoning or list options):
+Before writing, silently review the lead details against the six themes above. Decide which single angle (or combination) is the strongest fit for this specific lead based on what's most specific and provable from the details given (a recent launch, a visible app stack issue, a founder story, a growth signal, etc). Do not explain this choice or present alternatives. Go straight to writing the final message using whichever angle you determined is strongest.
+
+Also include a subject line that fits the angle and feels personal and curiosity driven, no exclamation marks, no spam sounding words.`;
 
 const DEFAULT_HTML_PROMPT = `Convert the following cold email into clean, professional HTML that renders well in Gmail and other email clients. Use a table-based layout for maximum email client compatibility.
 
@@ -190,16 +195,6 @@ Requirements:
 - Do NOT add images, logos, or decorative elements unless they were in the original
 - Do NOT add an unsubscribe footer
 - Return ONLY the complete HTML starting with <!DOCTYPE html>, no explanation, no markdown, no backticks`;
-
-const DEFAULT_BLEND_PROMPT = `You're combining multiple approach options into ONE single cold email, not writing them separately and not just stitching them together paragraph by paragraph.
-
-Read through all the selected approaches below — their angles, the specific details from the brief each one leans on, their tone, and their opening hooks. Then write one cohesive email that:
-- Picks the strongest opening hook out of the set, or blends two openings into one if they genuinely complement each other
-- Pulls in whichever specific details (app count, founder background, recent news, product line, etc.) actually strengthen the message, dropping anything redundant between the approaches
-- Keeps a single consistent tone throughout, even if the selected approaches listed different tones — pick the tone that best fits the overall blend
-- Reads like it was written with one clear angle in mind, not like a merged document
-
-Do not label or separate sections by approach number. Do not mention that this is a "combined" or "blended" email. It should read exactly like a single, natural, one-take cold email.`;
 
 const DEFAULT_PLAIN_PROMPT = `Take the email text below and return it as clean plain text, ready to paste directly into an email client's compose window.
 
@@ -291,7 +286,6 @@ function loadPrompts() {
     research: DEFAULT_RESEARCH_PROMPT,
     email: DEFAULT_EMAIL_PROMPT,
     html: DEFAULT_HTML_PROMPT,
-    blend: DEFAULT_BLEND_PROMPT,
     plainFormat: DEFAULT_PLAIN_PROMPT,
   };
   if (typeof window === "undefined") return defaults;
@@ -299,11 +293,20 @@ function loadPrompts() {
     const raw = localStorage.getItem(PROMPTS_KEY);
     if (!raw) return defaults;
     const p = JSON.parse(raw);
+    // The Email Writing Prompt used to end with a "Workflow" step that told
+    // the model to return a JSON array of approach options instead of a
+    // finished email — that stage no longer exists. If a saved prompt still
+    // carries that instruction, it's a leftover from before the flow
+    // simplified, not something you deliberately wrote, so auto-replace it
+    // with the current one-shot default rather than silently keeping the
+    // stale behavior forever.
+    const looksLikeOldApproachPrompt =
+      typeof p.email === "string" &&
+      (/return\s+only\s+a\s+valid\s+json\s+array/i.test(p.email) || /"number":\s*integer/i.test(p.email));
     return {
       research: p.research || defaults.research,
-      email: p.email || defaults.email,
+      email: looksLikeOldApproachPrompt ? defaults.email : (p.email || defaults.email),
       html: p.html || defaults.html,
-      blend: p.blend || defaults.blend,
       plainFormat: p.plainFormat || defaults.plainFormat,
     };
   } catch {
@@ -517,8 +520,12 @@ function withTrackingPixel(html: string, trackId: string): string {
 }
 
 function cleanEmails(raw: string): string {
+  // Some lead lists separate multiple addresses in one cell with ":" instead
+  // of a comma. Gmail (and mailto:) only treats comma/semicolon as "send to
+  // both" — a colon-separated string reads as one broken address — so we
+  // normalize ":" the same way as "," and ";" here.
   return raw
-    .split(/[,;\n]+/)
+    .split(/[,;:\n]+/)
     .map((e) => e.trim())
     .filter(Boolean)
     .join(",");
@@ -594,7 +601,6 @@ function Index() {
     research: DEFAULT_RESEARCH_PROMPT,
     email: DEFAULT_EMAIL_PROMPT,
     html: DEFAULT_HTML_PROMPT,
-    blend: DEFAULT_BLEND_PROMPT,
     plainFormat: DEFAULT_PLAIN_PROMPT,
   });
 
@@ -762,8 +768,11 @@ function Index() {
           setParsing(false); setParseProgress(100);
           const guessEmail = headers.find((h) => /e?mail/i.test(h)) ?? headers[0] ?? "";
           const guessDomain = headers.find((h) => /domain/i.test(h)) ?? "";
-          setState((s) => ({ ...s, headers, rows, rowStates: {}, targetEmailHeader: s.targetEmailHeader || guessEmail, domainHeader: s.domainHeader || guessDomain }));
-          toast.success(`Loaded ${rows.length.toLocaleString()} rows · ${headers.length} columns`);
+          const totalRows = rows.length;
+          const keptRows = guessEmail ? rows.filter((r) => String(r[guessEmail] ?? "").trim() !== "") : rows;
+          const skipped = totalRows - keptRows.length;
+          setState((s) => ({ ...s, headers, rows: keptRows, rowStates: {}, targetEmailHeader: s.targetEmailHeader || guessEmail, domainHeader: s.domainHeader || guessDomain }));
+          toast.success(`Loaded ${keptRows.length.toLocaleString()} rows · ${headers.length} columns${skipped > 0 ? ` — skipped ${skipped.toLocaleString()} with no email` : ""}`);
         } catch (err) { setParsing(false); toast.error(`Parse failed: ${(err as Error).message}`); }
       };
       reader.readAsArrayBuffer(file); return;
@@ -791,8 +800,11 @@ function Index() {
         setParsing(false); setParseProgress(100);
         const guessEmail = headers.find((h) => /e?mail/i.test(h)) ?? headers[0] ?? "";
         const guessDomain = headers.find((h) => /domain/i.test(h)) ?? "";
-        setState((s) => ({ ...s, headers, rows: collected, rowStates: {}, targetEmailHeader: s.targetEmailHeader || guessEmail, domainHeader: s.domainHeader || guessDomain }));
-        toast.success(`Loaded ${collected.length.toLocaleString()} rows · ${headers.length} columns`);
+        const totalRows = collected.length;
+        const keptRows = guessEmail ? collected.filter((r) => String(r[guessEmail] ?? "").trim() !== "") : collected;
+        const skipped = totalRows - keptRows.length;
+        setState((s) => ({ ...s, headers, rows: keptRows, rowStates: {}, targetEmailHeader: s.targetEmailHeader || guessEmail, domainHeader: s.domainHeader || guessDomain }));
+        toast.success(`Loaded ${keptRows.length.toLocaleString()} rows · ${headers.length} columns${skipped > 0 ? ` — skipped ${skipped.toLocaleString()} with no email` : ""}`);
       },
       error: (err) => { setParsing(false); toast.error(`Parse failed: ${err.message}`); },
     });
@@ -851,7 +863,7 @@ function Index() {
       } else { await navigator.clipboard.writeText(renderedHtml); }
       toast.success("Rich HTML copied — opening mail in 300ms…");
     } catch (e) { toast.error(`Clipboard failed: ${(e as Error).message}`); return; }
-    setTimeout(() => { window.location.href = buildMailto(state.recipientB, { subject: renderedSubjectB }); }, 300);
+    setTimeout(() => { window.location.href = buildMailto(recipients, { subject: renderedSubjectB }); }, 300);
   }, [state.recipientB, renderedHtml, renderedSubjectB]);
 
   const renderedSubjectAPreview = useMemo(
@@ -864,7 +876,7 @@ function Index() {
     const subject = renderTemplate(activeTemplate.subject, sampleRow, undefined, state.sendCounter);
     const body = renderTemplate(activeTemplate.body, sampleRow, undefined, state.sendCounter);
     toast.success("Opening test draft…");
-    window.location.href = buildMailto(state.recipientB, { subject, body });
+    window.location.href = buildMailto(recipients, { subject, body });
   }, [state.recipientB, activeTemplate, sampleRow]);
 
   // Session stats
@@ -963,6 +975,9 @@ function Index() {
             onDomainHeader={(v) => patch({ domainHeader: v })}
           />
         </CollapsibleSection>
+        <CollapsibleSection title="Look up by email" icon={<Search className="size-3.5 text-sky-glow" />} defaultOpen={false}>
+          <LeadLookupPanel rows={state.rows} headers={state.headers} />
+        </CollapsibleSection>
         <CollapsibleSection title="Open Tracking" icon={<Eye className="size-3.5 text-amber-glow" />} defaultOpen={false} badge={state.trackingEnabled ? <span className="rounded border border-sky-glow/40 bg-sky-glow/10 px-1.5 py-0.5 font-mono-data text-[10px] text-sky-glow">on</span> : undefined}>
           <AnalyticsPanel
             trackingEnabled={state.trackingEnabled}
@@ -990,7 +1005,7 @@ function Index() {
           {/* Both modes stay mounted at all times — only visibility toggles.
               Conditionally rendering (mount/unmount) here used to wipe out
               all of Research Mode's in-progress state (selected lead,
-              brief, approaches, generated emails) the instant you switched
+              brief, generated email) the instant you switched
               to Queue mode and back, since React destroys component state
               on unmount. Hiding with CSS instead preserves it. */}
           <div className={state.homepageMode === "research" ? "" : "hidden"}>
@@ -1307,11 +1322,10 @@ function GeminiKeyManager({ keys, onChange }: { keys: ApiKey[]; onChange: (updat
    PROMPT SETTINGS PANEL
    ============================================================ */
 
-const PROMPT_LABELS: Record<"research" | "email" | "html" | "blend" | "plainFormat", string> = {
+const PROMPT_LABELS: Record<"research" | "email" | "html" | "plainFormat", string> = {
   research: "Research Prompt",
   email: "Email Writing Prompt",
   html: "HTML Output Prompt",
-  blend: "Blend Prompt (used when 2+ approaches are combined into one email)",
   plainFormat: "Plain Text Output Prompt (used when Plain Text mode is selected)",
 };
 
@@ -1319,11 +1333,10 @@ const PROMPT_DEFAULTS = {
   research: DEFAULT_RESEARCH_PROMPT,
   email: DEFAULT_EMAIL_PROMPT,
   html: DEFAULT_HTML_PROMPT,
-  blend: DEFAULT_BLEND_PROMPT,
   plainFormat: DEFAULT_PLAIN_PROMPT,
 };
 
-type PromptSet = { research: string; email: string; html: string; blend: string; plainFormat: string };
+type PromptSet = { research: string; email: string; html: string; plainFormat: string };
 
 function PromptSettingsPanel({
   prompts, onChange,
@@ -1354,7 +1367,7 @@ function PromptSettingsPanel({
         Edit the prompts that drive the Research + Email Writer. Changes take effect on the next AI call. Use Reset to restore the original.
       </p>
 
-      {(["research", "email", "blend", "plainFormat", "html"] as const).map((key) => (
+      {(["research", "email", "plainFormat", "html"] as const).map((key) => (
         <div key={key} className="space-y-1.5">
           <div className="flex items-center justify-between gap-2">
             <Label className="font-mono-data text-[10px] uppercase tracking-wider text-muted-foreground">
@@ -1371,7 +1384,7 @@ function PromptSettingsPanel({
           <Textarea
             value={local[key]}
             onChange={(e) => setLocal((p) => ({ ...p, [key]: e.target.value }))}
-            rows={key === "html" || key === "plainFormat" || key === "blend" ? 6 : 10}
+            rows={key === "html" || key === "plainFormat" ? 6 : 10}
             className="font-mono-data text-[11px] leading-relaxed"
             spellCheck={false}
           />
@@ -1390,17 +1403,7 @@ function PromptSettingsPanel({
    RESEARCH MODE
    ============================================================ */
 
-interface ApproachItem {
-  number: number;
-  title: string;
-  why: string;
-  bestFor: string;
-  tone: string;
-  hook: string;
-}
-
 interface GeneratedEmail {
-  approach: number;
   title: string;
   subject: string;
   plain: string;
@@ -1408,16 +1411,14 @@ interface GeneratedEmail {
   format: "html" | "plain";
 }
 
-type ResearchStage = "idle" | "researching" | "brief" | "generatingApproaches" | "approaches" | "generatingEmail" | "email";
+type ResearchStage = "idle" | "researching" | "brief" | "generatingEmail" | "email";
 
 // Saved per-lead so switching between leads (or reloading the page) never
 // forces you to re-spend API calls on a store you've already researched.
 interface LeadCacheEntry {
   storeInput: string;
   brief: string;
-  approaches: ApproachItem[];
-  selectedApproaches: number[];
-  combineApproaches: boolean;
+  extraDetails: string;
   outputFormat: "html" | "plain";
   generatedEmails: GeneratedEmail[];
   savedAt: string;
@@ -1437,7 +1438,6 @@ function loadLeadCache(): Record<string, LeadCacheEntry> {
 function stageForCacheEntry(entry: LeadCacheEntry | undefined): ResearchStage {
   if (!entry) return "idle";
   if (entry.generatedEmails.length > 0) return "email";
-  if (entry.approaches.length > 0) return "approaches";
   if (entry.brief) return "brief";
   return "idle";
 }
@@ -1460,12 +1460,9 @@ function ResearchMode({
   const [manualInput, setManualInput] = useState("");
   const [stage, setStage] = useState<ResearchStage>("idle");
   const [brief, setBrief] = useState("");
-  const [approaches, setApproaches] = useState<ApproachItem[]>([]);
-  const [selectedApproaches, setSelectedApproaches] = useState<number[]>([]);
-  // When multiple approaches are selected: false = generate one email per
-  // approach (current default), true = blend the selected approaches'
-  // ideas into a single combined email instead.
-  const [combineApproaches, setCombineApproaches] = useState(false);
+  // Free-text box for anything you noticed that the research brief missed —
+  // gets folded into the email prompt alongside the brief.
+  const [extraDetails, setExtraDetails] = useState("");
   // Whether the generated email is written as HTML (with live preview +
   // HTML conversion step) or as plain text (mailto body prefilled directly).
   const [outputFormat, setOutputFormat] = useState<"html" | "plain">("html");
@@ -1474,9 +1471,9 @@ function ResearchMode({
   const [editingHtml, setEditingHtml] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
 
-  // Per-lead cache: research/approaches/emails already generated for a
-  // given store, persisted to localStorage so nothing needs re-fetching
-  // just because you switched leads, switched to Queue mode, or reloaded.
+  // Per-lead cache: research/email already generated for a given store,
+  // persisted to localStorage so nothing needs re-fetching just because
+  // you switched leads, switched to Queue mode, or reloaded.
   const [leadCache, setLeadCache] = useState<Record<string, LeadCacheEntry>>(() => loadLeadCache());
   useEffect(() => {
     try { localStorage.setItem(LEAD_CACHE_KEY, JSON.stringify(leadCache)); } catch {}
@@ -1513,23 +1510,19 @@ function ResearchMode({
   const reset = () => {
     setStage("idle");
     setBrief("");
-    setApproaches([]);
-    setSelectedApproaches([]);
-    setCombineApproaches(false);
+    setExtraDetails("");
     setOutputFormat("html");
     setGeneratedEmails([]);
     setActiveEmailTab(0);
     setEditingHtml(false);
   };
 
-  // Loads a saved lead's research/approaches/emails from cache instead of
-  // starting from scratch — this is what lets you click back into a lead
-  // you've already worked through without spending another API call.
+  // Loads a saved lead's research/email from cache instead of starting
+  // from scratch — this is what lets you click back into a lead you've
+  // already worked through without spending another API call.
   const hydrateFromCache = (entry: LeadCacheEntry) => {
     setBrief(entry.brief);
-    setApproaches(entry.approaches);
-    setSelectedApproaches(entry.selectedApproaches);
-    setCombineApproaches(entry.combineApproaches);
+    setExtraDetails(entry.extraDetails ?? "");
     setOutputFormat(entry.outputFormat ?? "html");
     setGeneratedEmails(entry.generatedEmails);
     setActiveEmailTab(0);
@@ -1555,9 +1548,7 @@ function ResearchMode({
       const next: LeadCacheEntry = {
         storeInput,
         brief: existing?.brief ?? "",
-        approaches: existing?.approaches ?? [],
-        selectedApproaches: existing?.selectedApproaches ?? [],
-        combineApproaches: existing?.combineApproaches ?? false,
+        extraDetails: existing?.extraDetails ?? "",
         outputFormat: existing?.outputFormat ?? "html",
         generatedEmails: existing?.generatedEmails ?? [],
         savedAt: new Date().toISOString(),
@@ -1572,44 +1563,23 @@ function ResearchMode({
     if (!input) { toast.error("Enter a store name or URL, or select a lead from the list"); return; }
     setStage("researching");
     setBrief("");
-    setApproaches([]);
-    setSelectedApproaches([]);
     setGeneratedEmails([]);
     try {
       const result = await geminiCall(`${prompts.research}\n\nStore to research: ${input}`, true);
       setBrief(result);
       setStage("brief");
-      // Fresh research invalidates any prior approaches/emails for this lead.
-      saveToCache({ brief: result, approaches: [], selectedApproaches: [], generatedEmails: [] });
+      // Fresh research invalidates any prior generated email for this lead.
+      saveToCache({ brief: result, generatedEmails: [] });
     } catch (err) {
       toast.error((err as Error).message);
       setStage("idle");
     }
   };
 
-  const generateApproaches = async () => {
-    if (!brief) return;
-    setStage("generatingApproaches");
-    try {
-      const prompt = `${prompts.email}\n\nResearch Brief:\n${brief}\n\nNow complete Step 2: return ONLY the JSON array of 4 approaches. No other text, no markdown, no backticks.`;
-      const raw = await geminiCall(prompt);
-      // Extract JSON array from response
-      const jsonMatch = raw.match(/\[[\s\S]*\]/);
-      if (!jsonMatch) throw new Error("Could not parse approach options from AI response");
-      const parsed = JSON.parse(jsonMatch[0]) as ApproachItem[];
-      setApproaches(parsed);
-      setStage("approaches");
-      saveToCache({ approaches: parsed, selectedApproaches: [], generatedEmails: [] });
-    } catch (err) {
-      toast.error(`Failed to generate approaches: ${(err as Error).message}`);
-      setStage("brief");
-    }
-  };
-
   // Runs the writing prompt, then either the HTML conversion prompt or the
   // plain-text formatting prompt depending on outputFormat, and returns a
   // finished GeneratedEmail.
-  const writeAndFormatEmail = async (writingPrompt: string, approachNum: number, title: string): Promise<GeneratedEmail> => {
+  const writeAndFormatEmail = async (writingPrompt: string): Promise<GeneratedEmail> => {
     const plainResult = await geminiCall(writingPrompt);
     const lines = plainResult.split("\n");
     const subjectLine = lines.find((l) => l.toLowerCase().startsWith("subject:")) ?? "";
@@ -1623,54 +1593,31 @@ function ResearchMode({
         ? prompts.plainFormat.replace("[EMAIL_TEXT]", plainBody)
         : `${prompts.plainFormat}\n\n${plainBody}`;
       const formatted = await geminiCall(plainPrompt);
-      return { approach: approachNum, title, subject, plain: formatted, html: "", format: "plain" };
+      return { title: "Email", subject, plain: formatted, html: "", format: "plain" };
     }
 
     const htmlPrompt = `${prompts.html}\n\nEmail to convert:\n\nSubject: ${subject}\n\n${plainBody}`;
     const htmlResult = await geminiCall(htmlPrompt);
-    return { approach: approachNum, title, subject, plain: plainBody, html: htmlResult, format: "html" };
+    return { title: "Email", subject, plain: plainBody, html: htmlResult, format: "html" };
   };
 
-  const generateEmails = async () => {
-    if (selectedApproaches.length === 0) { toast.error("Select at least one approach"); return; }
+  const generateEmail = async () => {
+    if (!brief) return;
     setStage("generatingEmail");
-    const emails: GeneratedEmail[] = [];
-
-    if (combineApproaches && selectedApproaches.length > 1) {
-      // Blend the selected approaches' ideas into ONE cohesive email,
-      // rather than generating a separate email per approach.
-      const chosen = approaches.filter((a) => selectedApproaches.includes(a.number));
-      try {
-        const approachSummaries = chosen
-          .map((a) => `Approach #${a.number} — "${a.title}"\nWhy it fits: ${a.why}\nTone: ${a.tone}\nHook: "${a.hook}"`)
-          .join("\n\n");
-        const emailPrompt = `${prompts.email}\n\nResearch Brief:\n${brief}\n\nStep 3: ${prompts.blend}\n\nSelected approaches to blend:\n${approachSummaries}\n\nInclude subject line. Return it as plain text with "Subject: ..." on the first line, then a blank line, then the email body.`;
-        const combinedTitle = `Combined: ${chosen.map((a) => a.title).join(" + ")}`;
-        emails.push(await writeAndFormatEmail(emailPrompt, 0, combinedTitle));
-      } catch (err) {
-        toast.error(`Combined email failed: ${(err as Error).message}`);
-      }
-    } else {
-      for (const num of selectedApproaches) {
-        const approach = approaches.find((a) => a.number === num);
-        if (!approach) continue;
-        try {
-          const emailPrompt = `${prompts.email}\n\nResearch Brief:\n${brief}\n\nStep 3: Write the full email using approach #${num}: "${approach.title}". Include subject line. Return it as plain text with "Subject: ..." on the first line, then a blank line, then the email body.`;
-          emails.push(await writeAndFormatEmail(emailPrompt, num, approach.title));
-        } catch (err) {
-          toast.error(`Approach ${num} failed: ${(err as Error).message}`);
-        }
-      }
-    }
-
-    if (emails.length > 0) {
-      setGeneratedEmails(emails);
+    try {
+      const detailsBlock = extraDetails.trim()
+        ? `\n\nAdditional details to factor in (I noticed these myself, the research brief may have missed them):\n${extraDetails.trim()}`
+        : "";
+      const emailPrompt = `${prompts.email}\n\nLead details:\n${brief}${detailsBlock}\n\nReturn it as plain text with "Subject: ..." on the first line, then a blank line, then the email body.`;
+      const email = await writeAndFormatEmail(emailPrompt);
+      setGeneratedEmails([email]);
       setActiveEmailTab(0);
       setStage("email");
-      saveToCache({ generatedEmails: emails, selectedApproaches, combineApproaches, outputFormat });
+      saveToCache({ generatedEmails: [email], extraDetails, outputFormat });
       if (selectedLeadIdx !== null) onMarkDone(selectedLeadIdx);
-    } else {
-      setStage("approaches");
+    } catch (err) {
+      toast.error(`Failed to generate email: ${(err as Error).message}`);
+      setStage("brief");
     }
   };
 
@@ -1808,18 +1755,16 @@ function ResearchMode({
       ) : null}
 
       {/* Research brief */}
-      {(stage === "brief" || stage === "generatingApproaches" || stage === "approaches" || stage === "generatingEmail") && brief && (
+      {(stage === "brief" || stage === "generatingEmail") && brief && (
         <div className="rounded-xl border border-border-strong/70 bg-surface-1 overflow-hidden">
           <div className="flex items-center justify-between border-b border-border-strong/60 px-4 py-2.5">
             <span className="flex items-center gap-2 font-mono-data text-[11px] uppercase tracking-wider text-muted-foreground">
               <BookOpen className="size-3.5 text-sky-glow" /> Research Brief
             </span>
             <div className="flex items-center gap-3">
-              {stage !== "generatingApproaches" && (
-                <button type="button" onClick={runResearch} className="font-mono-data text-[10px] text-muted-foreground underline decoration-dotted hover:text-foreground">
-                  Re-research
-                </button>
-              )}
+              <button type="button" onClick={runResearch} className="font-mono-data text-[10px] text-muted-foreground underline decoration-dotted hover:text-foreground">
+                Re-research
+              </button>
               <button type="button" onClick={reset} className="font-mono-data text-[10px] text-muted-foreground underline decoration-dotted hover:text-foreground">
                 Start over
               </button>
@@ -1830,143 +1775,63 @@ function ResearchMode({
               <pre className="whitespace-pre-wrap font-sans text-sm leading-relaxed text-foreground">{brief}</pre>
             </div>
           </div>
-          {stage === "brief" && (
-            <div className="border-t border-border-strong/60 p-3">
-              <Button onClick={generateApproaches} className="w-full glow-sky">
-                <Sparkles className="size-4" /> Generate email approaches
-              </Button>
-            </div>
-          )}
-          {stage === "generatingApproaches" && (
-            <div className="border-t border-border-strong/60 p-3">
-              <Button disabled className="w-full">
-                <RefreshCw className="size-4 animate-spin" /> Generating approaches…
-              </Button>
-            </div>
-          )}
-        </div>
-      )}
 
-      {/* Approach cards */}
-      {(stage === "approaches" || stage === "generatingEmail") && approaches.length > 0 && (
-        <div className="space-y-3">
-          <div className="flex items-center justify-between">
-            <p className="font-mono-data text-[11px] uppercase tracking-wider text-muted-foreground">
-              Choose your angle(s)
-            </p>
-            <div className="flex items-center gap-3">
-              {generatedEmails.length > 0 && stage === "approaches" && (
-                <button
-                  type="button"
-                  onClick={() => setStage("email")}
-                  className="font-mono-data text-[10px] text-sky-glow underline decoration-dotted hover:text-sky-glow/80"
-                >
-                  ← Back to email{generatedEmails.length > 1 ? "s" : ""}
-                </button>
-              )}
-              <p className="font-mono-data text-[10px] text-muted-foreground">
-                {selectedApproaches.length} selected
-              </p>
+          <div className="border-t border-border-strong/60 p-4 space-y-3">
+            <div className="space-y-1.5">
+              <Label className="font-mono-data text-[10px] uppercase tracking-wider text-muted-foreground">
+                Anything to add? (optional)
+              </Label>
+              <Textarea
+                value={extraDetails}
+                onChange={(e) => setExtraDetails(e.target.value)}
+                placeholder="Anything the research missed — a detail you noticed, a specific angle you want used, something you already know about this lead…"
+                rows={3}
+                className="font-sans text-sm leading-relaxed"
+              />
             </div>
-          </div>
-          {approaches.map((a) => {
-            const selected = selectedApproaches.includes(a.number);
-            return (
-              <button
-                key={a.number}
-                type="button"
-                onClick={() => setSelectedApproaches((prev) =>
-                  selected ? prev.filter((n) => n !== a.number) : [...prev, a.number]
-                )}
-                className={`w-full rounded-xl border p-3.5 text-left transition-all ${
-                  selected
-                    ? "border-sky-glow/60 bg-sky-glow/5 ring-1 ring-sky-glow/30"
-                    : "border-border-strong/60 bg-surface-1 hover:bg-surface-2"
-                }`}
-              >
-                <div className="flex items-start gap-3">
-                  <div className={`mt-0.5 flex size-6 shrink-0 items-center justify-center rounded-full font-mono-data text-xs font-bold ${selected ? "bg-sky-glow text-black" : "bg-surface-2 text-muted-foreground"}`}>
-                    {a.number}
-                  </div>
-                  <div className="min-w-0 space-y-2">
-                    <p className="font-semibold text-sm text-foreground">{a.title}</p>
-                    <p className="font-mono-data text-[11px] leading-relaxed text-muted-foreground">{a.why}</p>
-                    <div className="flex flex-wrap gap-x-4 gap-y-1">
-                      <span className="font-mono-data text-[10px] text-muted-foreground">
-                        <span className="text-sky-glow">Best for:</span> {a.bestFor}
-                      </span>
-                      <span className="font-mono-data text-[10px] text-muted-foreground">
-                        <span className="text-amber-glow">Tone:</span> {a.tone}
-                      </span>
-                    </div>
-                    <div className="rounded-lg border border-border-strong/40 bg-bg-app px-3 py-2">
-                      <p className="font-mono-data text-[10px] uppercase tracking-wider text-muted-foreground mb-1">Opening hook</p>
-                      <p className="font-sans text-[12px] italic text-foreground leading-relaxed">"{a.hook}"</p>
-                    </div>
-                  </div>
-                </div>
-              </button>
-            );
-          })}
-          {selectedApproaches.length > 1 && (
+
             <div className="rounded-lg border border-border-strong/60 bg-surface-2 p-2.5 space-y-2">
               <p className="font-mono-data text-[10px] uppercase tracking-wider text-muted-foreground">
-                {selectedApproaches.length} approaches selected — how should I use them?
+                Output format
               </p>
               <div className="flex gap-2">
                 <button
                   type="button"
-                  onClick={() => setCombineApproaches(false)}
-                  className={`flex-1 rounded-md border py-2 px-2 text-left font-mono-data text-[11px] ${!combineApproaches ? "border-sky-glow/60 bg-sky-glow/10 text-sky-glow" : "border-border-strong/60 text-muted-foreground"}`}
+                  onClick={() => setOutputFormat("plain")}
+                  className={`flex-1 rounded-md border py-2 px-2 text-left font-mono-data text-[11px] ${outputFormat === "plain" ? "border-sky-glow/60 bg-sky-glow/10 text-sky-glow" : "border-border-strong/60 text-muted-foreground"}`}
                 >
-                  <span className="block font-semibold">Separate emails</span>
-                  <span className="block text-[10px] opacity-80 normal-case">One email per approach, in its own tab</span>
+                  <span className="block font-semibold">Plain text</span>
+                  <span className="block text-[10px] opacity-80 normal-case">No HTML — mailto opens with the body already filled in</span>
                 </button>
                 <button
                   type="button"
-                  onClick={() => setCombineApproaches(true)}
-                  className={`flex-1 rounded-md border py-2 px-2 text-left font-mono-data text-[11px] ${combineApproaches ? "border-sky-glow/60 bg-sky-glow/10 text-sky-glow" : "border-border-strong/60 text-muted-foreground"}`}
+                  onClick={() => setOutputFormat("html")}
+                  className={`flex-1 rounded-md border py-2 px-2 text-left font-mono-data text-[11px] ${outputFormat === "html" ? "border-sky-glow/60 bg-sky-glow/10 text-sky-glow" : "border-border-strong/60 text-muted-foreground"}`}
                 >
-                  <span className="block font-semibold">Blend into one</span>
-                  <span className="block text-[10px] opacity-80 normal-case">Combine the best of each into a single email</span>
+                  <span className="block font-semibold">HTML</span>
+                  <span className="block text-[10px] opacity-80 normal-case">Styled email, live preview, copy HTML to paste in</span>
                 </button>
               </div>
             </div>
-          )}
-          <div className="rounded-lg border border-border-strong/60 bg-surface-2 p-2.5 space-y-2">
-            <p className="font-mono-data text-[10px] uppercase tracking-wider text-muted-foreground">
-              Output format
-            </p>
-            <div className="flex gap-2">
+
+            {generatedEmails.length > 0 && (
               <button
                 type="button"
-                onClick={() => setOutputFormat("plain")}
-                className={`flex-1 rounded-md border py-2 px-2 text-left font-mono-data text-[11px] ${outputFormat === "plain" ? "border-sky-glow/60 bg-sky-glow/10 text-sky-glow" : "border-border-strong/60 text-muted-foreground"}`}
+                onClick={() => setStage("email")}
+                className="w-full font-mono-data text-[10px] text-sky-glow underline decoration-dotted hover:text-sky-glow/80"
               >
-                <span className="block font-semibold">Plain text</span>
-                <span className="block text-[10px] opacity-80 normal-case">No HTML — mailto opens with the body already filled in</span>
+                ← Back to the email already generated for this lead
               </button>
-              <button
-                type="button"
-                onClick={() => setOutputFormat("html")}
-                className={`flex-1 rounded-md border py-2 px-2 text-left font-mono-data text-[11px] ${outputFormat === "html" ? "border-sky-glow/60 bg-sky-glow/10 text-sky-glow" : "border-border-strong/60 text-muted-foreground"}`}
-              >
-                <span className="block font-semibold">HTML</span>
-                <span className="block text-[10px] opacity-80 normal-case">Styled email, live preview, copy HTML to paste in</span>
-              </button>
-            </div>
-          </div>
-          <Button
-            onClick={generateEmails}
-            disabled={selectedApproaches.length === 0 || stage === "generatingEmail"}
-            className="w-full glow-sky"
-          >
-            {stage === "generatingEmail" ? (
-              <><RefreshCw className="size-4 animate-spin" /> Generating {combineApproaches && selectedApproaches.length > 1 ? "combined email" : `${selectedApproaches.length} email${selectedApproaches.length > 1 ? "s" : ""}`}…</>
-            ) : (
-              <><PenLine className="size-4" /> Generate {selectedApproaches.length === 0 ? "email" : combineApproaches && selectedApproaches.length > 1 ? "combined email" : `${selectedApproaches.length} email${selectedApproaches.length > 1 ? "s" : ""}`}</>
             )}
-          </Button>
+
+            <Button onClick={generateEmail} disabled={stage === "generatingEmail"} className="w-full glow-sky">
+              {stage === "generatingEmail" ? (
+                <><RefreshCw className="size-4 animate-spin" /> Writing email…</>
+              ) : (
+                <><PenLine className="size-4" /> {generatedEmails.length > 0 ? "Regenerate email" : "Generate email"}</>
+              )}
+            </Button>
+          </div>
         </div>
       )}
 
@@ -1977,8 +1842,8 @@ function ResearchMode({
             <span className="flex items-center gap-2 font-mono-data text-[11px] uppercase tracking-wider text-muted-foreground">
               <PenLine className="size-3.5 text-sky-glow" /> Generated Emails
             </span>
-            <button type="button" onClick={() => setStage("approaches")} className="font-mono-data text-[10px] text-muted-foreground underline decoration-dotted hover:text-foreground">
-              Back to approaches
+            <button type="button" onClick={() => setStage("brief")} className="font-mono-data text-[10px] text-muted-foreground underline decoration-dotted hover:text-foreground">
+              ← Back to brief
             </button>
           </div>
 
@@ -2490,6 +2355,109 @@ function IngestPanel({
         </>
       )}
     </section>
+  );
+}
+
+/* --------------------------- Email Lookup Panel --------------------------- */
+
+// Search the loaded CSV by email address and show every field for the
+// matching row(s) as tap-to-copy chips. Lives only in the drawer so it
+// never touches the main Queue/Research interface.
+function LeadLookupPanel({ rows, headers }: { rows: Row[]; headers: string[] }) {
+  const [query, setQuery] = useState("");
+  const [copiedKey, setCopiedKey] = useState<string | null>(null);
+
+  const copyValue = async (key: string, value: string) => {
+    if (!value) return;
+    try {
+      await navigator.clipboard.writeText(value);
+      setCopiedKey(key);
+      setTimeout(() => setCopiedKey((k) => (k === key ? null : k)), 1200);
+    } catch {
+      toast.error("Clipboard failed");
+    }
+  };
+
+  const results = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return [];
+    // Match against every cell, not just a guessed email column — some
+    // lists keep a second address in a different field, and colon- or
+    // semicolon-separated multi-email cells should still match on either half.
+    const matches: number[] = [];
+    for (let i = 0; i < rows.length; i++) {
+      const row = rows[i];
+      const hit = headers.some((h) => {
+        const cell = String(row[h] ?? "").toLowerCase();
+        if (!cell.includes("@")) return false;
+        return cell.split(/[,;:\s]+/).some((piece) => piece.includes(q)) || cell.includes(q);
+      });
+      if (hit) matches.push(i);
+      if (matches.length >= 25) break;
+    }
+    return matches;
+  }, [query, rows, headers]);
+
+  return (
+    <div className="space-y-3">
+      <p className="font-mono-data text-[10px] leading-relaxed text-muted-foreground">
+        Search the loaded CSV by email address to pull up everything known about that lead, without scrolling the queue.
+      </p>
+      <div className="relative">
+        <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
+        <Input
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="Search by email address…"
+          className="pl-8 font-mono-data text-xs"
+        />
+      </div>
+
+      {query.trim() && results.length === 0 && (
+        <p className="font-mono-data text-[11px] text-muted-foreground">No rows match that email.</p>
+      )}
+
+      {results.length > 0 && (
+        <div className="space-y-3">
+          {results.length >= 25 && (
+            <p className="font-mono-data text-[10px] text-amber-glow">Showing first 25 matches — narrow your search for more.</p>
+          )}
+          {results.map((idx) => {
+            const row = rows[idx];
+            return (
+              <div key={idx} className="rounded-lg border border-border-strong/60 bg-surface-2 p-3 space-y-1.5">
+                {headers.map((h) => {
+                  const value = String(row[h] ?? "");
+                  if (!value) return null;
+                  const cellKey = `${idx}:${h}`;
+                  return (
+                    <button
+                      key={h}
+                      type="button"
+                      onClick={() => copyValue(cellKey, value)}
+                      className="flex w-full items-start gap-2 rounded-md px-1.5 py-1 text-left hover:bg-surface-1"
+                      title="Tap to copy"
+                    >
+                      <span className="mt-0.5 shrink-0 font-mono-data text-[9px] uppercase tracking-wider text-muted-foreground w-20 truncate">
+                        {h}
+                      </span>
+                      <span className="min-w-0 flex-1 break-all font-mono-data text-[11px] text-foreground">
+                        {value}
+                      </span>
+                      {copiedKey === cellKey ? (
+                        <CheckCircle className="size-3.5 shrink-0 text-emerald-400" />
+                      ) : (
+                        <Copy className="size-3.5 shrink-0 text-muted-foreground/50" />
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -3113,10 +3081,10 @@ function NextRowPreview({
   // pixel-free, or just scrolling to this row would silently "open" it.
   const renderedHtml = autoFormatHtml(renderTemplate(htmlTpl, row, extras, spinSeed));
   const plainHref = toAddr
-    ? buildMailto(rawRecipients, { subject, body })
+    ? buildMailto(toAddr, { subject, body })
     : "";
   const htmlHref = toAddr
-    ? buildMailto(rawRecipients, { subject })
+    ? buildMailto(toAddr, { subject })
     : "";
   const sendHtml = async () => {
     if (!toAddr) return;
