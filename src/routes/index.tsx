@@ -11,7 +11,7 @@ import {
   Palette, Highlighter, CornerDownLeft, RotateCcw,
   Menu, X, Settings, Key, CheckCircle, XCircle, AlertCircle,
   Globe, Beaker, ChevronRight, Search, BookOpen, PenLine,
-  Sparkles, RefreshCw, Clipboard, Download,
+  Sparkles, RefreshCw, Clipboard, Download, ExternalLink,
 } from "lucide-react";
 import { Plus, ChevronDown, ChevronUp, Shuffle, Activity, ShieldAlert, History, Layers } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -542,6 +542,16 @@ function buildMailto(to: string, opts: { subject?: string; body?: string; bcc?: 
   if (opts.bcc) parts.push(`bcc=${encodeURIComponent(opts.bcc)}`);
   const q = parts.join("&");
   return `mailto:${encodeURIComponent(to)}${q ? `?${q}` : ""}`;
+}
+
+// Opens a real, full Google search in a new tab (All / Images / Videos /
+// News / AI Mode, exactly as the user's own browser renders it) — this is
+// deliberately NOT embedded, since Google blocks its search page from being
+// iframed on any other site (X-Frame-Options), and even if it didn't, same
+// origin policy would still stop the app from reading anything back out of
+// it. A new tab is the only thing that's actually possible here.
+function googleSearchUrl(query: string): string {
+  return `https://www.google.com/search?q=${encodeURIComponent(query)}`;
 }
 
 // Pulls a recipient address out of the research brief's "Contact info"
@@ -1694,6 +1704,16 @@ function ResearchMode({
                       </span>
                     )}
                   </button>
+                  <a
+                    href={googleSearchUrl(domain)}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    onClick={(e) => e.stopPropagation()}
+                    title="Search this store on Google (opens a new tab)"
+                    className="flex size-5 shrink-0 items-center justify-center rounded-full border border-border-strong/60 text-muted-foreground/50 hover:text-foreground hover:border-foreground/40"
+                  >
+                    <ExternalLink className="size-3" />
+                  </a>
                   <button
                     type="button"
                     onClick={(e) => { e.stopPropagation(); onToggleDone(i); }}
@@ -1740,17 +1760,30 @@ function ResearchMode({
               onKeyDown={(e) => { if (e.key === "Enter") runResearch(); }}
             />
           )}
-          <Button
-            onClick={runResearch}
-            disabled={stage === "researching" || !storeInput}
-            className="w-full glow-sky"
-          >
-            {stage === "researching" ? (
-              <><RefreshCw className="size-4 animate-spin" /> Researching…</>
-            ) : (
-              <><Globe className="size-4" /> Research this store</>
+          <div className="flex gap-2">
+            <Button
+              onClick={runResearch}
+              disabled={stage === "researching" || !storeInput}
+              className="flex-1 glow-sky"
+            >
+              {stage === "researching" ? (
+                <><RefreshCw className="size-4 animate-spin" /> Researching…</>
+              ) : (
+                <><Globe className="size-4" /> Research this store</>
+              )}
+            </Button>
+            {storeInput && (
+              <a
+                href={googleSearchUrl(storeInput)}
+                target="_blank"
+                rel="noopener noreferrer"
+                title="Search this store on Google (opens a new tab — All / Images / News / AI Mode)"
+                className="flex shrink-0 items-center justify-center gap-1.5 rounded-md border border-border-strong/60 px-3 font-mono-data text-[11px] text-muted-foreground hover:text-foreground"
+              >
+                <ExternalLink className="size-3.5" />
+              </a>
             )}
-          </Button>
+          </div>
         </div>
       ) : null}
 
@@ -1762,6 +1795,15 @@ function ResearchMode({
               <BookOpen className="size-3.5 text-sky-glow" /> Research Brief
             </span>
             <div className="flex items-center gap-3">
+              <a
+                href={googleSearchUrl(storeInput)}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex items-center gap-1 font-mono-data text-[10px] text-muted-foreground underline decoration-dotted hover:text-foreground"
+                title="Search this store on Google (opens a new tab)"
+              >
+                <ExternalLink className="size-3" /> Google it
+              </a>
               <button type="button" onClick={runResearch} className="font-mono-data text-[10px] text-muted-foreground underline decoration-dotted hover:text-foreground">
                 Re-research
               </button>
