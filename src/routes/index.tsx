@@ -85,6 +85,9 @@ interface PersistedState {
   // manually toggleable. Persists across mode switches and page reloads
   // via the same localStorage-backed state as everything else.
   researchDone: Record<number, boolean>;
+  // Leads whose email ends with this domain (e.g. "gmail.com") jump to the
+  // front of the send queue, so they go out first. Empty = no reordering.
+  priorityDomain: string;
 }
 
 /* ============================================================
@@ -235,6 +238,7 @@ const DEFAULT_STATE: PersistedState = {
   trackingEnabled: false,
   homepageMode: "research",
   researchDone: {},
+  priorityDomain: "",
 };
 
 function newId() {
@@ -822,13 +826,21 @@ function Index() {
 
   // Queue
   const queue = useMemo(() => {
-    const pending: number[] = [], processed: number[] = [];
+    const domain = state.priorityDomain.trim().toLowerCase().replace(/^@/, "");
+    const priority: number[] = [], pending: number[] = [], processed: number[] = [];
     for (let i = 0; i < state.rows.length; i++) {
-      if (state.rowStates[i] === "processed" || state.rowStates[i] === "skipped") processed.push(i);
-      else pending.push(i);
+      if (state.rowStates[i] === "processed" || state.rowStates[i] === "skipped") { processed.push(i); continue; }
+      if (domain) {
+        const email = String(state.rows[i]?.[state.targetEmailHeader] ?? "").toLowerCase();
+        // Multi-email cells (colon/comma/semicolon separated) count as a
+        // match if ANY address in the cell ends with the target domain.
+        const matches = email.split(/[,;:\s]+/).some((piece) => piece.endsWith(`@${domain}`));
+        if (matches) { priority.push(i); continue; }
+      }
+      pending.push(i);
     }
-    return [...pending, ...processed];
-  }, [state.rows, state.rowStates]);
+    return [...priority, ...pending, ...processed];
+  }, [state.rows, state.rowStates, state.priorityDomain, state.targetEmailHeader]);
 
   const processedCount = useMemo(
     () => Object.values(state.rowStates).filter((v) => v === "processed").length,
@@ -2568,6 +2580,17 @@ function SectionACard({
         ? firstPendingFromStart
         : firstPendingIndex;
   const pendingCount = state.rows.length - processedCount;
+  const priorityMatchCount = useMemo(() => {
+    const domain = state.priorityDomain.trim().toLowerCase().replace(/^@/, "");
+    if (!domain) return 0;
+    let count = 0;
+    for (let i = 0; i < state.rows.length; i++) {
+      if (state.rowStates[i] === "processed" || state.rowStates[i] === "skipped") continue;
+      const email = String(state.rows[i]?.[state.targetEmailHeader] ?? "").toLowerCase();
+      if (email.split(/[,;:\s]+/).some((piece) => piece.endsWith(`@${domain}`))) count++;
+    }
+    return count;
+  }, [state.priorityDomain, state.rows, state.rowStates, state.targetEmailHeader]);
   const [filter, setFilter] = useState<"all" | "active" | "processed">("all");
   const htmlTextareaRef = useRef<HTMLTextAreaElement>(null);
   const [processedSearch, setProcessedSearch] = useState("");
@@ -2937,6 +2960,33 @@ function SectionACard({
             >
               <RotateCcw className="inline size-3" /> from #{queueStartFrom}
             </button>
+          )}
+        </div>
+        <div className="flex items-center gap-1.5">
+          <label className="font-mono-data text-[10px] uppercase tracking-wider text-muted-foreground">
+            Prioritize domain
+          </label>
+          <Input
+            value={state.priorityDomain}
+            onChange={(e) => patch({ priorityDomain: e.target.value })}
+            placeholder="e.g. gmail.com"
+            className="h-8 w-32 font-mono-data text-xs"
+            title="Pending leads whose email ends with this domain move to the front of the queue and get sent first"
+          />
+          {state.priorityDomain.trim() && (
+            <>
+              <span className="font-mono-data text-[10px] text-sky-glow">
+                {priorityMatchCount} match{priorityMatchCount === 1 ? "" : "es"}
+              </span>
+              <button
+                type="button"
+                onClick={() => patch({ priorityDomain: "" })}
+                className="rounded-md border border-sky-glow/40 bg-sky-glow/10 px-2 py-1 font-mono-data text-[10px] text-sky-glow hover:text-foreground"
+                title="Clear priority · resume normal queue order"
+              >
+                <RotateCcw className="inline size-3" /> clear
+              </button>
+            </>
           )}
         </div>
       </div>
