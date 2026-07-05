@@ -88,6 +88,13 @@ interface PersistedState {
   // Leads whose email ends with this domain (e.g. "gmail.com") jump to the
   // front of the send queue, so they go out first. Empty = no reordering.
   priorityDomain: string;
+  // Auto-detected column holding each lead's country, plus the currently
+  // selected country to prioritize (empty = no country filter).
+  countryHeader: string;
+  priorityCountry: string;
+  // When BOTH priorityDomain and priorityCountry are set: "all" requires a
+  // lead to match both to be prioritized, "any" lets either one qualify.
+  priorityMatchMode: "all" | "any";
 }
 
 /* ============================================================
@@ -239,6 +246,9 @@ const DEFAULT_STATE: PersistedState = {
   homepageMode: "research",
   researchDone: {},
   priorityDomain: "",
+  countryHeader: "",
+  priorityCountry: "",
+  priorityMatchMode: "all",
 };
 
 function newId() {
@@ -782,10 +792,11 @@ function Index() {
           setParsing(false); setParseProgress(100);
           const guessEmail = headers.find((h) => /e?mail/i.test(h)) ?? headers[0] ?? "";
           const guessDomain = headers.find((h) => /domain/i.test(h)) ?? "";
+          const guessCountry = headers.find((h) => /country/i.test(h)) ?? "";
           const totalRows = rows.length;
           const keptRows = guessEmail ? rows.filter((r) => String(r[guessEmail] ?? "").trim() !== "") : rows;
           const skipped = totalRows - keptRows.length;
-          setState((s) => ({ ...s, headers, rows: keptRows, rowStates: {}, targetEmailHeader: s.targetEmailHeader || guessEmail, domainHeader: s.domainHeader || guessDomain }));
+          setState((s) => ({ ...s, headers, rows: keptRows, rowStates: {}, targetEmailHeader: s.targetEmailHeader || guessEmail, domainHeader: s.domainHeader || guessDomain, countryHeader: s.countryHeader || guessCountry }));
           toast.success(`Loaded ${keptRows.length.toLocaleString()} rows · ${headers.length} columns${skipped > 0 ? ` — skipped ${skipped.toLocaleString()} with no email` : ""}`);
         } catch (err) { setParsing(false); toast.error(`Parse failed: ${(err as Error).message}`); }
       };
@@ -814,10 +825,11 @@ function Index() {
         setParsing(false); setParseProgress(100);
         const guessEmail = headers.find((h) => /e?mail/i.test(h)) ?? headers[0] ?? "";
         const guessDomain = headers.find((h) => /domain/i.test(h)) ?? "";
+        const guessCountry = headers.find((h) => /country/i.test(h)) ?? "";
         const totalRows = collected.length;
         const keptRows = guessEmail ? collected.filter((r) => String(r[guessEmail] ?? "").trim() !== "") : collected;
         const skipped = totalRows - keptRows.length;
-        setState((s) => ({ ...s, headers, rows: keptRows, rowStates: {}, targetEmailHeader: s.targetEmailHeader || guessEmail, domainHeader: s.domainHeader || guessDomain }));
+        setState((s) => ({ ...s, headers, rows: keptRows, rowStates: {}, targetEmailHeader: s.targetEmailHeader || guessEmail, domainHeader: s.domainHeader || guessDomain, countryHeader: s.countryHeader || guessCountry }));
         toast.success(`Loaded ${keptRows.length.toLocaleString()} rows · ${headers.length} columns${skipped > 0 ? ` — skipped ${skipped.toLocaleString()} with no email` : ""}`);
       },
       error: (err) => { setParsing(false); toast.error(`Parse failed: ${err.message}`); },
@@ -827,20 +839,31 @@ function Index() {
   // Queue
   const queue = useMemo(() => {
     const domain = state.priorityDomain.trim().toLowerCase().replace(/^@/, "");
+    const country = state.priorityCountry.trim().toLowerCase();
     const priority: number[] = [], pending: number[] = [], processed: number[] = [];
     for (let i = 0; i < state.rows.length; i++) {
       if (state.rowStates[i] === "processed" || state.rowStates[i] === "skipped") { processed.push(i); continue; }
-      if (domain) {
-        const email = String(state.rows[i]?.[state.targetEmailHeader] ?? "").toLowerCase();
-        // Multi-email cells (colon/comma/semicolon separated) count as a
-        // match if ANY address in the cell ends with the target domain.
-        const matches = email.split(/[,;:\s]+/).some((piece) => piece.endsWith(`@${domain}`));
-        if (matches) { priority.push(i); continue; }
+      if (domain || country) {
+        let domainMatch = true, countryMatch = true;
+        if (domain) {
+          const email = String(state.rows[i]?.[state.targetEmailHeader] ?? "").toLowerCase();
+          // Multi-email cells (colon/comma/semicolon separated) count as a
+          // match if ANY address in the cell ends with the target domain.
+          domainMatch = email.split(/[,;:\s]+/).some((piece) => piece.endsWith(`@${domain}`));
+        }
+        if (country) {
+          const cell = String(state.rows[i]?.[state.countryHeader] ?? "").trim().toLowerCase();
+          countryMatch = cell === country;
+        }
+        const isMatch = state.priorityMatchMode === "any" && domain && country
+          ? domainMatch || countryMatch
+          : domainMatch && countryMatch;
+        if (isMatch) { priority.push(i); continue; }
       }
       pending.push(i);
     }
     return [...priority, ...pending, ...processed];
-  }, [state.rows, state.rowStates, state.priorityDomain, state.targetEmailHeader]);
+  }, [state.rows, state.rowStates, state.priorityDomain, state.priorityCountry, state.priorityMatchMode, state.targetEmailHeader, state.countryHeader]);
 
   const processedCount = useMemo(
     () => Object.values(state.rowStates).filter((v) => v === "processed").length,
@@ -995,6 +1018,8 @@ function Index() {
             onTargetEmailHeader={(v) => patch({ targetEmailHeader: v })}
             domainHeader={state.domainHeader}
             onDomainHeader={(v) => patch({ domainHeader: v })}
+            countryHeader={state.countryHeader}
+            onCountryHeader={(v) => patch({ countryHeader: v })}
           />
         </CollapsibleSection>
         <CollapsibleSection title="Look up by email" icon={<Search className="size-3.5 text-sky-glow" />} defaultOpen={false}>
@@ -2287,7 +2312,7 @@ function Header({
 
 function IngestPanel({
   parsing, progress, onFile, headers, totalRows, processedRows,
-  targetEmailHeader, onTargetEmailHeader, domainHeader, onDomainHeader,
+  targetEmailHeader, onTargetEmailHeader, domainHeader, onDomainHeader, countryHeader, onCountryHeader,
 }: {
   parsing: boolean;
   progress: number;
@@ -2299,6 +2324,8 @@ function IngestPanel({
   onTargetEmailHeader: (v: string) => void;
   domainHeader: string;
   onDomainHeader: (v: string) => void;
+  countryHeader: string;
+  onCountryHeader: (v: string) => void;
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
   return (
@@ -2370,6 +2397,22 @@ function IngestPanel({
               value={domainHeader}
               onChange={(e) => onDomainHeader(e.target.value)}
               className="h-9 w-full rounded-md border border-border-strong/70 bg-surface-2 px-2 font-mono-data text-sm outline-none focus:glow-sky"
+            >
+              <option value="">-- Not set --</option>
+              {headers.map((h) => (
+                <option key={h} value={h}>{h}</option>
+              ))}
+            </select>
+          </div>
+          <div className="mt-2 grid gap-2 sm:grid-cols-[200px_1fr] sm:items-center">
+            <Label className="text-xs uppercase tracking-wider text-muted-foreground">
+              Country column
+            </Label>
+            <select
+              value={countryHeader}
+              onChange={(e) => onCountryHeader(e.target.value)}
+              className="h-9 w-full rounded-md border border-border-strong/70 bg-surface-2 px-2 font-mono-data text-sm outline-none focus:glow-sky"
+              title="Used by the Prioritize country filter and the country badge in the send preview"
             >
               <option value="">-- Not set --</option>
               {headers.map((h) => (
@@ -2582,15 +2625,40 @@ function SectionACard({
   const pendingCount = state.rows.length - processedCount;
   const priorityMatchCount = useMemo(() => {
     const domain = state.priorityDomain.trim().toLowerCase().replace(/^@/, "");
-    if (!domain) return 0;
+    const country = state.priorityCountry.trim().toLowerCase();
+    if (!domain && !country) return 0;
     let count = 0;
     for (let i = 0; i < state.rows.length; i++) {
       if (state.rowStates[i] === "processed" || state.rowStates[i] === "skipped") continue;
-      const email = String(state.rows[i]?.[state.targetEmailHeader] ?? "").toLowerCase();
-      if (email.split(/[,;:\s]+/).some((piece) => piece.endsWith(`@${domain}`))) count++;
+      let domainMatch = true, countryMatch = true;
+      if (domain) {
+        const email = String(state.rows[i]?.[state.targetEmailHeader] ?? "").toLowerCase();
+        domainMatch = email.split(/[,;:\s]+/).some((piece) => piece.endsWith(`@${domain}`));
+      }
+      if (country) {
+        const cell = String(state.rows[i]?.[state.countryHeader] ?? "").trim().toLowerCase();
+        countryMatch = cell === country;
+      }
+      const isMatch = state.priorityMatchMode === "any" && domain && country
+        ? domainMatch || countryMatch
+        : domainMatch && countryMatch;
+      if (isMatch) count++;
     }
     return count;
-  }, [state.priorityDomain, state.rows, state.rowStates, state.targetEmailHeader]);
+  }, [state.priorityDomain, state.priorityCountry, state.priorityMatchMode, state.rows, state.rowStates, state.targetEmailHeader, state.countryHeader]);
+
+  // Distinct country values actually present in the loaded CSV, for the
+  // dropdown — pulled from the data itself rather than a fixed list, since
+  // exact spelling/format (e.g. "US" vs "United States") varies by list.
+  const availableCountries = useMemo(() => {
+    if (!state.countryHeader) return [];
+    const set = new Set<string>();
+    for (const row of state.rows) {
+      const v = String(row[state.countryHeader] ?? "").trim();
+      if (v) set.add(v);
+    }
+    return Array.from(set).sort((a, b) => a.localeCompare(b));
+  }, [state.rows, state.countryHeader]);
   const [filter, setFilter] = useState<"all" | "active" | "processed">("all");
   const htmlTextareaRef = useRef<HTMLTextAreaElement>(null);
   const [processedSearch, setProcessedSearch] = useState("");
@@ -2962,7 +3030,7 @@ function SectionACard({
             </button>
           )}
         </div>
-        <div className="flex items-center gap-1.5">
+        <div className="flex flex-wrap items-center gap-1.5">
           <label className="font-mono-data text-[10px] uppercase tracking-wider text-muted-foreground">
             Prioritize domain
           </label>
@@ -2973,14 +3041,52 @@ function SectionACard({
             className="h-8 w-32 font-mono-data text-xs"
             title="Pending leads whose email ends with this domain move to the front of the queue and get sent first"
           />
-          {state.priorityDomain.trim() && (
+
+          <label className="font-mono-data text-[10px] uppercase tracking-wider text-muted-foreground ml-1">
+            Country
+          </label>
+          <select
+            value={state.priorityCountry}
+            onChange={(e) => patch({ priorityCountry: e.target.value })}
+            disabled={availableCountries.length === 0}
+            className="h-8 rounded-md border border-border-strong/70 bg-surface-2 px-2 font-mono-data text-xs outline-none focus:glow-sky disabled:opacity-50"
+            title={availableCountries.length === 0 ? "No country column detected in this CSV" : "Pending leads from this country move to the front of the queue and get sent first"}
+          >
+            <option value="">-- Any --</option>
+            {availableCountries.map((c) => (
+              <option key={c} value={c}>{c}</option>
+            ))}
+          </select>
+
+          {state.priorityDomain.trim() && state.priorityCountry.trim() && (
+            <div className="flex items-center gap-1 rounded-md border border-border-strong/60 bg-surface-2 p-0.5 ml-1">
+              <button
+                type="button"
+                onClick={() => patch({ priorityMatchMode: "all" })}
+                title="Only prioritize leads matching BOTH the domain and the country"
+                className={`rounded px-1.5 py-0.5 font-mono-data text-[10px] ${state.priorityMatchMode === "all" ? "bg-sky-glow/20 text-sky-glow" : "text-muted-foreground"}`}
+              >
+                Both
+              </button>
+              <button
+                type="button"
+                onClick={() => patch({ priorityMatchMode: "any" })}
+                title="Prioritize leads matching EITHER the domain or the country"
+                className={`rounded px-1.5 py-0.5 font-mono-data text-[10px] ${state.priorityMatchMode === "any" ? "bg-sky-glow/20 text-sky-glow" : "text-muted-foreground"}`}
+              >
+                Either
+              </button>
+            </div>
+          )}
+
+          {(state.priorityDomain.trim() || state.priorityCountry.trim()) && (
             <>
               <span className="font-mono-data text-[10px] text-sky-glow">
                 {priorityMatchCount} match{priorityMatchCount === 1 ? "" : "es"}
               </span>
               <button
                 type="button"
-                onClick={() => patch({ priorityDomain: "" })}
+                onClick={() => patch({ priorityDomain: "", priorityCountry: "" })}
                 className="rounded-md border border-sky-glow/40 bg-sky-glow/10 px-2 py-1 font-mono-data text-[10px] text-sky-glow hover:text-foreground"
                 title="Clear priority · resume normal queue order"
               >
@@ -3116,6 +3222,7 @@ function SectionACard({
             rowIndex={nextPendingIndex}
             row={state.rows[nextPendingIndex]}
             targetEmailHeader={state.targetEmailHeader}
+            countryHeader={state.countryHeader}
             subjectTpl={rotation.subject}
             bodyTpl={rotation.body}
             htmlMode={state.htmlMode}
@@ -3146,11 +3253,12 @@ function SectionACard({
 }
 
 function NextRowPreview({
-  rowIndex, row, targetEmailHeader, subjectTpl, bodyTpl, htmlMode, htmlTpl, onSend, onSkip, isResend, ai, spinSeed, trackingEnabled,
+  rowIndex, row, targetEmailHeader, countryHeader, subjectTpl, bodyTpl, htmlMode, htmlTpl, onSend, onSkip, isResend, ai, spinSeed, trackingEnabled,
 }: {
   rowIndex: number;
   row: Row | undefined;
   targetEmailHeader: string;
+  countryHeader: string;
   subjectTpl: string;
   bodyTpl: string;
   htmlMode: boolean;
@@ -3222,6 +3330,11 @@ function NextRowPreview({
         <div className="font-mono-data text-[11px]">
           <span className="text-muted-foreground">To: </span>
           <span className="text-foreground">{toAddr || <span className="text-destructive">— missing —</span>}</span>
+          {countryHeader && row?.[countryHeader] && (
+            <span className="ml-2 rounded border border-border-strong/60 bg-bg-app px-1.5 py-0.5 text-[10px] text-muted-foreground">
+              {row[countryHeader]}
+            </span>
+          )}
         </div>
         <div className="font-mono-data text-[11px]">
           <span className="text-muted-foreground">Subject: </span>
