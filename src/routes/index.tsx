@@ -11,7 +11,7 @@ import {
   Palette, Highlighter, CornerDownLeft, RotateCcw,
   Menu, X, Settings, Key, CheckCircle, XCircle, AlertCircle,
   Globe, Beaker, ChevronRight, Search, BookOpen, PenLine,
-  Sparkles, RefreshCw, Clipboard, Download, ExternalLink,
+  Sparkles, RefreshCw, Clipboard, Download, ExternalLink, EyeOff,
 } from "lucide-react";
 import { Plus, ChevronDown, ChevronUp, Shuffle, Activity, ShieldAlert, History, Layers } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -630,6 +630,7 @@ function Index() {
 
   // Draggable send button
   const [dragUnlocked, setDragUnlocked] = useState(false);
+  const [buttonsHidden, setButtonsHidden] = useState(false);
   const [dragPos, setDragPos] = useState<{ x: number; y: number } | null>(() => {
     if (typeof window === "undefined") return null;
     try {
@@ -658,7 +659,7 @@ function Index() {
         tapTimerRef.current = null;
         lastTapRef.current = 0;
         setDragUnlocked((cur) => {
-          if (cur) { toast.success("Send button locked in place"); return false; }
+          if (cur) { toast.success("Send button locked in place"); setButtonsHidden(false); return false; }
           return cur;
         });
       }, 360);
@@ -792,7 +793,10 @@ function Index() {
           setParsing(false); setParseProgress(100);
           const guessEmail = headers.find((h) => /e?mail/i.test(h)) ?? headers[0] ?? "";
           const guessDomain = headers.find((h) => /domain/i.test(h)) ?? "";
-          const guessCountry = headers.find((h) => /country/i.test(h)) ?? "";
+          const guessCountry =
+            headers.find((h) => /^country[\s_-]?code$/i.test(h.trim())) ??
+            headers.find((h) => /country/i.test(h)) ??
+            "";
           const totalRows = rows.length;
           const keptRows = guessEmail ? rows.filter((r) => String(r[guessEmail] ?? "").trim() !== "") : rows;
           const skipped = totalRows - keptRows.length;
@@ -825,7 +829,10 @@ function Index() {
         setParsing(false); setParseProgress(100);
         const guessEmail = headers.find((h) => /e?mail/i.test(h)) ?? headers[0] ?? "";
         const guessDomain = headers.find((h) => /domain/i.test(h)) ?? "";
-        const guessCountry = headers.find((h) => /country/i.test(h)) ?? "";
+        const guessCountry =
+            headers.find((h) => /^country[\s_-]?code$/i.test(h.trim())) ??
+            headers.find((h) => /country/i.test(h)) ??
+            "";
         const totalRows = collected.length;
         const keptRows = guessEmail ? collected.filter((r) => String(r[guessEmail] ?? "").trim() !== "") : collected;
         const skipped = totalRows - keptRows.length;
@@ -1040,7 +1047,7 @@ function Index() {
       </SideDrawer>
 
       <main className="mx-auto max-w-5xl px-3 pb-24 pt-4 sm:px-6">
-        <DragContext.Provider value={{ dragUnlocked, dragPos, setDragPos }}>
+        <DragContext.Provider value={{ dragUnlocked, dragPos, setDragPos, buttonsHidden, setButtonsHidden }}>
           {resume && (
             <ResumeBanner
               lastRow={resume.lastRow}
@@ -2085,15 +2092,21 @@ type DragCtx = {
   dragUnlocked: boolean;
   dragPos: { x: number; y: number } | null;
   setDragPos: (p: { x: number; y: number } | null) => void;
+  // Only ever applies while dragUnlocked (double-tap) mode is active —
+  // locked/normal mode always shows Send/Skip regardless of this flag.
+  buttonsHidden: boolean;
+  setButtonsHidden: (v: boolean) => void;
 };
 const DragContext = createContext<DragCtx>({
   dragUnlocked: false,
   dragPos: null,
   setDragPos: () => {},
+  buttonsHidden: false,
+  setButtonsHidden: () => {},
 });
 
 function DraggableSendShell({ children }: { children: React.ReactNode }) {
-  const { dragUnlocked, dragPos, setDragPos } = useContext(DragContext);
+  const { dragUnlocked, dragPos, setDragPos, buttonsHidden, setButtonsHidden } = useContext(DragContext);
   const ref = useRef<HTMLDivElement>(null);
   const dragRef = useRef<{
     active: boolean;
@@ -2103,6 +2116,9 @@ function DraggableSendShell({ children }: { children: React.ReactNode }) {
   }>({ active: false, offX: 0, offY: 0, moved: false });
 
   const isFloating = dragUnlocked || dragPos !== null;
+  // Hiding only ever takes effect while double-tap (drag) mode is active —
+  // in normal locked mode, Send/Skip always render, untouched.
+  const collapsed = dragUnlocked && buttonsHidden;
 
   const beginDrag = (clientX: number, clientY: number) => {
     if (!dragUnlocked) return;
@@ -2197,7 +2213,23 @@ function DraggableSendShell({ children }: { children: React.ReactNode }) {
           : ""
       }
     >
-      {children}
+      {dragUnlocked && (
+        <div className="mb-1 flex justify-end">
+          <button
+            type="button"
+            // Toggling shouldn't also start a drag on the same tap.
+            onMouseDown={(e) => e.stopPropagation()}
+            onTouchStart={(e) => e.stopPropagation()}
+            onClick={() => setButtonsHidden(!buttonsHidden)}
+            title={buttonsHidden ? "Show Send/Skip buttons" : "Hide Send/Skip buttons"}
+            className="flex items-center gap-1 rounded-full border border-border-strong/60 bg-surface-2 px-2 py-0.5 font-mono-data text-[9px] text-muted-foreground hover:text-foreground"
+          >
+            {buttonsHidden ? <Eye className="size-3" /> : <EyeOff className="size-3" />}
+            {buttonsHidden ? "Show" : "Hide"}
+          </button>
+        </div>
+      )}
+      {!collapsed && children}
     </div>
   );
 }
@@ -3720,74 +3752,132 @@ function TemplateControlPanel({
             </Button>
           </div>
           <div className="space-y-3">
-            {templates.map((t, idx) => {
-              const isActive = t.id === activeTemplateId;
-              return (
-                <div
-                  key={t.id}
-                  className={`rounded-lg border p-3 ${
-                    isActive ? "border-sky-glow/60 bg-sky-glow/5" : "border-border-strong/40 bg-surface-2"
-                  }`}
-                >
-                  <div className="mb-2 flex flex-wrap items-center gap-2">
-                    <span className="font-mono-data text-[10px] uppercase text-muted-foreground">#{idx + 1}</span>
-                    <Input
-                      value={t.name}
-                      onChange={(e) => onUpdate(t.id, { name: e.target.value })}
-                      className="h-7 max-w-[200px] font-mono-data text-xs"
-                      placeholder="Template name"
-                    />
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      className="h-7"
-                      onClick={() => onSelect(t.id)}
-                      disabled={isActive}
-                    >
-                      {isActive ? "Active" : "Activate"}
-                    </Button>
-                    <div className="ml-auto">
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        className="h-7 text-destructive hover:bg-destructive/10"
-                        onClick={() => onDelete(t.id)}
-                        aria-label={`Delete ${t.name}`}
-                      >
-                        <Trash2 className="size-3.5" />
-                      </Button>
-                    </div>
-                  </div>
-                  <div className="grid gap-2">
-                    <Input
-                      value={t.subject}
-                      onChange={(e) => onUpdate(t.id, { subject: e.target.value })}
-                      placeholder="Subject"
-                      className="h-8 font-mono-data text-xs"
-                    />
-                    <Textarea
-                      value={t.body}
-                      onChange={(e) => onUpdate(t.id, { body: e.target.value })}
-                      placeholder="Plain-text body"
-                      rows={3}
-                      className="font-mono-data text-[12px]"
-                    />
-                    <Textarea
-                      value={t.html}
-                      onChange={(e) => onUpdate(t.id, { html: e.target.value })}
-                      placeholder="HTML body"
-                      rows={3}
-                      className="font-mono-data text-[12px]"
-                      spellCheck={false}
-                    />
-                  </div>
-                </div>
-              );
-            })}
+            {templates.map((t, idx) => (
+              <TemplateEditorCard
+                key={t.id}
+                t={t}
+                idx={idx}
+                isActive={t.id === activeTemplateId}
+                onSelect={onSelect}
+                onDelete={onDelete}
+                onUpdate={onUpdate}
+              />
+            ))}
           </div>
         </div>
       )}
     </section>
+  );
+}
+
+// Holds its own local draft of a template's fields so typing is instant and
+// never touches the shared app state (which was re-rendering the whole
+// app — including the live preview iframe — on every keystroke). Nothing
+// propagates out to the rest of the app until you hit "Sync" or leave the
+// field, so typing doesn't fight the preview for CPU.
+function TemplateEditorCard({
+  t, idx, isActive, onSelect, onDelete, onUpdate,
+}: {
+  t: TemplateItem;
+  idx: number;
+  isActive: boolean;
+  onSelect: (id: string) => void;
+  onDelete: (id: string) => void;
+  onUpdate: (id: string, p: Partial<TemplateItem>) => void;
+}) {
+  const [draft, setDraft] = useState({ name: t.name, subject: t.subject, body: t.body, html: t.html });
+  const [dirty, setDirty] = useState(false);
+
+  // Re-sync from props if the template changes from outside (switching
+  // templates, reset, import, etc.) — but never clobber an unsynced edit
+  // you're still mid-typing.
+  useEffect(() => {
+    if (!dirty) setDraft({ name: t.name, subject: t.subject, body: t.body, html: t.html });
+  }, [t.id, t.name, t.subject, t.body, t.html, dirty]);
+
+  const sync = () => {
+    onUpdate(t.id, draft);
+    setDirty(false);
+  };
+
+  const set = (patch: Partial<typeof draft>) => {
+    setDraft((d) => ({ ...d, ...patch }));
+    setDirty(true);
+  };
+
+  return (
+    <div
+      className={`rounded-lg border p-3 ${
+        isActive ? "border-sky-glow/60 bg-sky-glow/5" : "border-border-strong/40 bg-surface-2"
+      }`}
+    >
+      <div className="mb-2 flex flex-wrap items-center gap-2">
+        <span className="font-mono-data text-[10px] uppercase text-muted-foreground">#{idx + 1}</span>
+        <Input
+          value={draft.name}
+          onChange={(e) => set({ name: e.target.value })}
+          onBlur={sync}
+          className="h-7 max-w-[200px] font-sans text-sm"
+          placeholder="Template name"
+        />
+        <Button
+          size="sm"
+          variant="ghost"
+          className="h-7"
+          onClick={() => onSelect(t.id)}
+          disabled={isActive}
+        >
+          {isActive ? "Active" : "Activate"}
+        </Button>
+        {dirty && (
+          <Button size="sm" onClick={sync} className="h-7 glow-sky">
+            <RefreshCw className="size-3" /> Sync
+          </Button>
+        )}
+        <div className="ml-auto">
+          <Button
+            size="sm"
+            variant="ghost"
+            className="h-7 text-destructive hover:bg-destructive/10"
+            onClick={() => onDelete(t.id)}
+            aria-label={`Delete ${t.name}`}
+          >
+            <Trash2 className="size-3.5" />
+          </Button>
+        </div>
+      </div>
+      <div className="grid gap-2">
+        <Input
+          value={draft.subject}
+          onChange={(e) => set({ subject: e.target.value })}
+          onBlur={sync}
+          placeholder="Subject"
+          className="h-8 font-sans text-sm"
+        />
+        <Textarea
+          value={draft.body}
+          onChange={(e) => set({ body: e.target.value })}
+          onBlur={sync}
+          placeholder="Plain-text body"
+          rows={3}
+          className="font-sans text-sm leading-relaxed"
+        />
+        <Textarea
+          value={draft.html}
+          onChange={(e) => set({ html: e.target.value })}
+          onBlur={sync}
+          placeholder="HTML body"
+          rows={3}
+          className="font-sans text-sm leading-relaxed"
+          spellCheck={false}
+        />
+      </div>
+      {dirty && (
+        <p className="mt-1.5 font-mono-data text-[10px] text-amber-glow">
+          Unsynced changes — tap Sync (or tap away) to update the live preview.
+        </p>
+      )}
+    </div>
   );
 }
 
@@ -3949,3 +4039,4 @@ function AnalyticsPanel({
     </>
   );
 }
+
