@@ -2740,6 +2740,14 @@ function SectionACard({
     : 0;
   const overLimit = mailtoLen > 2000;
 
+  // The fully token-substituted HTML — same string that drives the Live
+  // Preview iframe, and what "Copy template" copies (never the raw
+  // {token} source in the editor above).
+  const liveRenderedHtml = useMemo(
+    () => autoFormatHtml(renderTemplate(activeTemplate.html, previewRow ?? sampleRow, undefined, state.sendCounter)),
+    [activeTemplate.html, previewRow, sampleRow, state.sendCounter]
+  );
+
   return (
     <div className="space-y-4 rounded-xl border border-border-strong/70 bg-surface-1 p-4">
       {/* HTML mode toggle */}
@@ -2757,54 +2765,58 @@ function SectionACard({
       </label>
 
       {/* Active Template Dropdown + rotation toggles */}
-      <div className="space-y-2 rounded-lg border border-border-strong/60 bg-surface-2 p-3">
-        <div className="flex flex-wrap items-center gap-2">
-          <Label className="font-mono-data text-[10px] uppercase tracking-wider text-muted-foreground">
-            Active template
-          </Label>
-          <select
-            value={state.activeTemplateId}
-            onChange={(e) => patch({ activeTemplateId: e.target.value })}
-            className="h-8 flex-1 min-w-[160px] rounded-md border border-border-strong/70 bg-bg-app px-2 font-mono-data text-xs outline-none focus:glow-sky"
-          >
-            {state.templates.map((t) => (
-              <option key={t.id} value={t.id}>{t.name}</option>
-            ))}
-          </select>
-          <span className="font-mono-data text-[10px] text-muted-foreground">
-            {state.templates.length} total
-          </span>
+      <CollapsibleSection
+        title="Active Template & Rotation"
+        icon={<Shuffle className="size-3.5 text-sky-glow" />}
+        defaultOpen
+        badge={<span className="font-mono-data text-[10px] text-muted-foreground">{state.templates.length} total</span>}
+      >
+        <div className="space-y-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <Label className="font-mono-data text-[10px] uppercase tracking-wider text-muted-foreground">
+              Active template
+            </Label>
+            <select
+              value={state.activeTemplateId}
+              onChange={(e) => patch({ activeTemplateId: e.target.value })}
+              className="h-8 flex-1 min-w-[160px] rounded-md border border-border-strong/70 bg-bg-app px-2 font-mono-data text-xs outline-none focus:glow-sky"
+            >
+              {state.templates.map((t) => (
+                <option key={t.id} value={t.id}>{t.name}</option>
+              ))}
+            </select>
+          </div>
+          <div className="grid gap-2 sm:grid-cols-2">
+            <label className="flex items-center justify-between gap-2 rounded border border-border-strong/40 bg-bg-app px-2 py-1.5">
+              <span className="flex items-center gap-1.5 font-mono-data text-[11px] text-foreground">
+                <Shuffle className="size-3 text-sky-glow" /> Rotate Subjects
+              </span>
+              <input
+                type="checkbox"
+                checked={state.rotateSubjects}
+                onChange={(e) => patch({ rotateSubjects: e.target.checked })}
+                className="size-4 accent-[var(--sky)]"
+              />
+            </label>
+            <label className="flex items-center justify-between gap-2 rounded border border-border-strong/40 bg-bg-app px-2 py-1.5">
+              <span className="flex items-center gap-1.5 font-mono-data text-[11px] text-foreground">
+                <Shuffle className="size-3 text-amber-glow" /> Rotate Body
+              </span>
+              <input
+                type="checkbox"
+                checked={state.rotateBodies}
+                onChange={(e) => patch({ rotateBodies: e.target.checked })}
+                className="size-4 accent-[var(--amber)]"
+              />
+            </label>
+          </div>
+          {(state.rotateSubjects || state.rotateBodies) && state.templates.length > 1 && (
+            <p className="font-mono-data text-[10px] text-muted-foreground">
+              Next send → <span className="text-sky-glow">{rotation.rotName}</span> (slot #{rotation.rotIndex + 1}/{state.templates.length})
+            </p>
+          )}
         </div>
-        <div className="grid gap-2 sm:grid-cols-2">
-          <label className="flex items-center justify-between gap-2 rounded border border-border-strong/40 bg-bg-app px-2 py-1.5">
-            <span className="flex items-center gap-1.5 font-mono-data text-[11px] text-foreground">
-              <Shuffle className="size-3 text-sky-glow" /> Rotate Subjects
-            </span>
-            <input
-              type="checkbox"
-              checked={state.rotateSubjects}
-              onChange={(e) => patch({ rotateSubjects: e.target.checked })}
-              className="size-4 accent-[var(--sky)]"
-            />
-          </label>
-          <label className="flex items-center justify-between gap-2 rounded border border-border-strong/40 bg-bg-app px-2 py-1.5">
-            <span className="flex items-center gap-1.5 font-mono-data text-[11px] text-foreground">
-              <Shuffle className="size-3 text-amber-glow" /> Rotate Body
-            </span>
-            <input
-              type="checkbox"
-              checked={state.rotateBodies}
-              onChange={(e) => patch({ rotateBodies: e.target.checked })}
-              className="size-4 accent-[var(--amber)]"
-            />
-          </label>
-        </div>
-        {(state.rotateSubjects || state.rotateBodies) && state.templates.length > 1 && (
-          <p className="font-mono-data text-[10px] text-muted-foreground">
-            Next send → <span className="text-sky-glow">{rotation.rotName}</span> (slot #{rotation.rotIndex + 1}/{state.templates.length})
-          </p>
-        )}
-      </div>
+      </CollapsibleSection>
 
       <CollapsibleSection
         title="Spam & Link Health"
@@ -2818,54 +2830,87 @@ function SectionACard({
         />
       </CollapsibleSection>
 
-      <div className="grid gap-3 sm:grid-cols-2">
-        <Field label="Subject template">
-          <Input
-            value={activeTemplate.subject}
-            onChange={(e) => updateTemplate(activeTemplate.id, { subject: e.target.value })}
-            className="font-mono-data"
-            placeholder="Hi {first_name}…"
-          />
-        </Field>
-        <Field label="Email header column">
-          <Input
-            value={state.targetEmailHeader}
-            onChange={(e) => patch({ targetEmailHeader: e.target.value })}
-            className="font-mono-data"
-            placeholder="email"
-          />
-        </Field>
-      </div>
-      {state.htmlMode ? (
-        <>
-          <Field label="HTML code template">
-            <HtmlToolbar
-              textareaRef={htmlTextareaRef}
-              value={activeTemplate.html}
-              onChange={(v) => updateTemplate(activeTemplate.id, { html: v })}
-            />
-            <Textarea
-              ref={htmlTextareaRef}
-              value={activeTemplate.html}
-              onChange={(e) => updateTemplate(activeTemplate.id, { html: e.target.value })}
-              rows={8}
-              className="font-mono-data text-[12px] leading-relaxed rounded-t-none border-t-0"
-              spellCheck={false}
-              placeholder="<div>Hi {first_name}…</div>"
+      <CollapsibleSection
+        title="Subject & Sender Settings"
+        icon={<Mail className="size-3.5 text-sky-glow" />}
+        defaultOpen
+      >
+        <div className="grid gap-3 sm:grid-cols-2">
+          <Field label="Subject template">
+            <Input
+              value={activeTemplate.subject}
+              onChange={(e) => updateTemplate(activeTemplate.id, { subject: e.target.value })}
+              className="font-mono-data"
+              placeholder="Hi {first_name}…"
             />
           </Field>
+          <Field label="Email header column">
+            <Input
+              value={state.targetEmailHeader}
+              onChange={(e) => patch({ targetEmailHeader: e.target.value })}
+              className="font-mono-data"
+              placeholder="email"
+            />
+          </Field>
+        </div>
+      </CollapsibleSection>
+      {state.htmlMode ? (
+        <>
+          <CollapsibleSection
+            title="HTML Code Template"
+            icon={<Code2 className="size-3.5 text-amber-glow" />}
+            defaultOpen
+          >
+            <Field label="HTML code template">
+              <HtmlToolbar
+                textareaRef={htmlTextareaRef}
+                value={activeTemplate.html}
+                onChange={(v) => updateTemplate(activeTemplate.id, { html: v })}
+              />
+              <Textarea
+                ref={htmlTextareaRef}
+                value={activeTemplate.html}
+                onChange={(e) => updateTemplate(activeTemplate.id, { html: e.target.value })}
+                rows={8}
+                className="font-mono-data text-[12px] leading-relaxed rounded-t-none border-t-0"
+                spellCheck={false}
+                placeholder="<div>Hi {first_name}…</div>"
+              />
+            </Field>
+          </CollapsibleSection>
+
+          {/* Live Preview stays outside the collapsible section above and
+              always renders, regardless of whether the HTML editor is
+              expanded or collapsed — this is what you're about to send. */}
           <div>
-            <div className="mb-2 flex items-center gap-2">
-              <Eye className="size-3.5 text-muted-foreground" />
-              <span className="font-mono-data text-[10px] uppercase tracking-wider text-muted-foreground">
-                Live preview
+            <div className="mb-2 flex items-center justify-between gap-2">
+              <span className="flex items-center gap-2">
+                <Eye className="size-3.5 text-muted-foreground" />
+                <span className="font-mono-data text-[10px] uppercase tracking-wider text-muted-foreground">
+                  Live preview
+                </span>
               </span>
+              <button
+                type="button"
+                onClick={async () => {
+                  try {
+                    await navigator.clipboard.writeText(liveRenderedHtml);
+                    toast.success("Rendered HTML copied");
+                  } catch {
+                    toast.error("Clipboard failed");
+                  }
+                }}
+                className="flex items-center gap-1 rounded-md border border-border-strong/60 bg-surface-2 px-2 py-1 font-mono-data text-[10px] text-muted-foreground hover:text-foreground"
+                title="Copy the fully rendered HTML (tokens already filled in), not the raw {token} template"
+              >
+                <Copy className="size-3" /> Copy template
+              </button>
             </div>
             <div className="overflow-hidden rounded-lg border border-border-strong/60 bg-white">
               <iframe
                 title="HTML preview"
                 sandbox=""
-                srcDoc={`<!doctype html><html><body style="margin:0;padding:12px;font-family:system-ui">${autoFormatHtml(renderTemplate(activeTemplate.html, previewRow ?? sampleRow, undefined, state.sendCounter))}</body></html>`}
+                srcDoc={`<!doctype html><html><body style="margin:0;padding:12px;font-family:system-ui">${liveRenderedHtml}</body></html>`}
                 className="block h-[300px] w-full"
               />
             </div>
