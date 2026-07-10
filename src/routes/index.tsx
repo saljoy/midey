@@ -1087,9 +1087,6 @@ function Index() {
             onCountryHeader={(v) => patch({ countryHeader: v })}
           />
         </CollapsibleSection>
-        <CollapsibleSection title="Look up by email" icon={<Search className="size-3.5 text-sky-glow" />} defaultOpen={false}>
-          <LeadLookupPanel rows={state.rows} headers={state.headers} />
-        </CollapsibleSection>
         <CollapsibleSection title="API Keys" icon={<Key className="size-3.5 text-sky-glow" />} defaultOpen={apiKeys.length === 0}>
           <GeminiKeyManager keys={apiKeys} onChange={setApiKeys} />
         </CollapsibleSection>
@@ -2415,6 +2412,14 @@ function Header({
   return (
     <header className="sticky top-0 z-30 border-b border-border-strong/60 bg-bg-app/80 backdrop-blur supports-[backdrop-filter]:bg-bg-app/60">
       <div className="mx-auto flex max-w-5xl items-center gap-2 px-3 py-3 sm:px-6">
+        <Button variant="ghost" size="icon" onClick={onOpenDrawer} aria-label="Open settings">
+          <Menu className="size-4" />
+        </Button>
+
+        <Button variant="ghost" size="icon" onClick={onToggleTheme} aria-label="Toggle theme">
+          {theme === "dark" ? <Sun className="size-4" /> : <Moon className="size-4" />}
+        </Button>
+
         <div className="flex min-w-0 flex-1 items-center gap-2">
           <div className="grid size-9 place-items-center rounded-md bg-surface-2 glow-sky">
             <Mail className="size-4 text-sky-glow" />
@@ -2466,10 +2471,6 @@ function Header({
           </button>
         </div>
 
-        <Button variant="ghost" size="icon" onClick={onToggleTheme} aria-label="Toggle theme">
-          {theme === "dark" ? <Sun className="size-4" /> : <Moon className="size-4" />}
-        </Button>
-
         <Dialog open={open} onOpenChange={setOpen}>
           <DialogTrigger asChild>
             <Button variant="ghost" size="icon" aria-label="Clear all data">
@@ -2491,10 +2492,6 @@ function Header({
             </DialogFooter>
           </DialogContent>
         </Dialog>
-
-        <Button variant="ghost" size="icon" onClick={onOpenDrawer} aria-label="Open settings">
-          <Menu className="size-4" />
-        </Button>
       </div>
     </header>
   );
@@ -2924,6 +2921,14 @@ function SectionACard({
         />
       </label>
 
+      <CollapsibleSection
+        title="Look up by email"
+        icon={<Search className="size-3.5 text-sky-glow" />}
+        defaultOpen={false}
+      >
+        <LeadLookupPanel rows={state.rows} headers={state.headers} />
+      </CollapsibleSection>
+
       {/* Active Template Dropdown + rotation toggles */}
       <CollapsibleSection
         title="Active Template & Rotation"
@@ -3077,86 +3082,100 @@ function SectionACard({
           </div>
 
           {/* Test sandbox */}
-          <div className="space-y-2 rounded-lg border border-amber-glow/40 bg-amber-glow/5 p-3">
-            <div className="flex items-center gap-2 font-mono-data text-[10px] uppercase tracking-wider text-amber-glow">
-              <Zap className="size-3.5" /> Test sandbox · does not advance queue
+          <CollapsibleSection
+            title="Test Sandbox"
+            icon={<Zap className="size-3.5 text-amber-glow" />}
+            defaultOpen={false}
+          >
+            <div className="space-y-2 rounded-lg border border-amber-glow/40 bg-amber-glow/5 p-3">
+              <div className="flex items-center gap-2 font-mono-data text-[10px] uppercase tracking-wider text-amber-glow">
+                <Zap className="size-3.5" /> Does not advance queue
+              </div>
+              <div className="grid gap-2 sm:grid-cols-2">
+                <Input
+                  type="email"
+                  value={state.recipientB}
+                  onChange={(e) => patch({ recipientB: e.target.value })}
+                  placeholder="manual test email"
+                  className="h-9 font-mono-data text-xs"
+                />
+                <Input
+                  type="number"
+                  min={0}
+                  max={Math.max(0, state.rows.length - 1)}
+                  value={state.sampleIdB}
+                  onChange={(e) => patch({ sampleIdB: Math.max(0, Number(e.target.value) || 0) })}
+                  placeholder="sample row id"
+                  className="h-9 font-mono-data text-xs"
+                />
+              </div>
+              <Button
+                size="sm"
+                onClick={executeTestHtml}
+                className="glow-amber w-full bg-[var(--amber)] text-black hover:bg-[var(--amber)]/90"
+              >
+                <Copy className="size-3.5" /> Send test draft
+              </Button>
+              <p className="font-mono-data text-[10px] text-muted-foreground">
+                Subject preview: <span className="text-amber-glow">{renderedTestSubject || "—"}</span>
+              </p>
             </div>
-            <div className="grid gap-2 sm:grid-cols-2">
-              <Input
-                type="email"
-                value={state.recipientB}
-                onChange={(e) => patch({ recipientB: e.target.value })}
-                placeholder="manual test email"
-                className="h-9 font-mono-data text-xs"
-              />
-              <Input
-                type="number"
-                min={0}
-                max={Math.max(0, state.rows.length - 1)}
-                value={state.sampleIdB}
-                onChange={(e) => patch({ sampleIdB: Math.max(0, Number(e.target.value) || 0) })}
-                placeholder="sample row id"
-                className="h-9 font-mono-data text-xs"
-              />
-            </div>
-            <Button
-              size="sm"
-              onClick={executeTestHtml}
-              className="glow-amber w-full bg-[var(--amber)] text-black hover:bg-[var(--amber)]/90"
-            >
-              <Copy className="size-3.5" /> Send test draft
-            </Button>
-            <p className="font-mono-data text-[10px] text-muted-foreground">
-              Subject preview: <span className="text-amber-glow">{renderedTestSubject || "—"}</span>
-            </p>
-          </div>
+          </CollapsibleSection>
         </>
       ) : (
         <>
-          <Field label="Plain-text body template">
-            <Textarea
-              value={activeTemplate.body}
-              onChange={(e) => updateTemplate(activeTemplate.id, { body: e.target.value })}
-              rows={6}
-              className="font-mono-data text-[13px]"
-              placeholder="Hi {first_name}, …"
-            />
-          </Field>
+          <CollapsibleSection
+            title="Plain-Text Body Template"
+            icon={<FileText className="size-3.5 text-sky-glow" />}
+            defaultOpen
+          >
+            <div className="space-y-3">
+              <Field label="Plain-text body template">
+                <Textarea
+                  value={activeTemplate.body}
+                  onChange={(e) => updateTemplate(activeTemplate.id, { body: e.target.value })}
+                  rows={6}
+                  className="font-mono-data text-[13px]"
+                  placeholder="Hi {first_name}, …"
+                />
+              </Field>
 
-          {/* Test sandbox · plain text */}
-          <div className="space-y-2 rounded-lg border border-amber-glow/40 bg-amber-glow/5 p-3">
-            <div className="flex items-center gap-2 font-mono-data text-[10px] uppercase tracking-wider text-amber-glow">
-              <Zap className="size-3.5" /> Test sandbox · does not advance queue
+              {/* Test sandbox · plain text */}
+              <div className="space-y-2 rounded-lg border border-amber-glow/40 bg-amber-glow/5 p-3">
+                <div className="flex items-center gap-2 font-mono-data text-[10px] uppercase tracking-wider text-amber-glow">
+                  <Zap className="size-3.5" /> Test sandbox · does not advance queue
+                </div>
+                <div className="grid gap-2 sm:grid-cols-2">
+                  <Input
+                    type="email"
+                    value={state.recipientB}
+                    onChange={(e) => patch({ recipientB: e.target.value })}
+                    placeholder="manual test email"
+                    className="h-9 font-mono-data text-xs"
+                  />
+                  <Input
+                    type="number"
+                    min={0}
+                    max={Math.max(0, state.rows.length - 1)}
+                    value={state.sampleIdB}
+                    onChange={(e) => patch({ sampleIdB: Math.max(0, Number(e.target.value) || 0) })}
+                    placeholder="sample row id"
+                    className="h-9 font-mono-data text-xs"
+                  />
+                </div>
+                <Button
+                  size="sm"
+                  onClick={executeTestPlain}
+                  className="glow-amber w-full bg-[var(--amber)] text-black hover:bg-[var(--amber)]/90"
+                >
+                  <Copy className="size-3.5" /> Send test draft
+                </Button>
+                <p className="font-mono-data text-[10px] text-muted-foreground">
+                  Subject preview: <span className="text-amber-glow">{renderedTestSubjectPlain || "—"}</span>
+                </p>
+              </div>
             </div>
-            <div className="grid gap-2 sm:grid-cols-2">
-              <Input
-                type="email"
-                value={state.recipientB}
-                onChange={(e) => patch({ recipientB: e.target.value })}
-                placeholder="manual test email"
-                className="h-9 font-mono-data text-xs"
-              />
-              <Input
-                type="number"
-                min={0}
-                max={Math.max(0, state.rows.length - 1)}
-                value={state.sampleIdB}
-                onChange={(e) => patch({ sampleIdB: Math.max(0, Number(e.target.value) || 0) })}
-                placeholder="sample row id"
-                className="h-9 font-mono-data text-xs"
-              />
-            </div>
-            <Button
-              size="sm"
-              onClick={executeTestPlain}
-              className="glow-amber w-full bg-[var(--amber)] text-black hover:bg-[var(--amber)]/90"
-            >
-              <Copy className="size-3.5" /> Send test draft
-            </Button>
-            <p className="font-mono-data text-[10px] text-muted-foreground">
-              Subject preview: <span className="text-amber-glow">{renderedTestSubjectPlain || "—"}</span>
-            </p>
-          </div>
+          </CollapsibleSection>
         </>
       )}
       <div className="flex flex-wrap items-center justify-between gap-2 -mt-2">
@@ -3172,38 +3191,49 @@ function SectionACard({
         )}
       </div>
 
-      <div className="flex items-center justify-between">
-        <div className="font-mono-data text-xs text-muted-foreground">
-          Queue · <span className="text-foreground">{pendingCount.toLocaleString()}</span> pending ·{" "}
-          <span className="text-sky-glow">{processedCount.toLocaleString()}</span> done
-        </div>
-        <div className="font-mono-data text-[10px] uppercase tracking-wider text-muted-foreground">
-          headless
-        </div>
-      </div>
+      <CollapsibleSection
+        title="Queue & Filters"
+        icon={<Layers className="size-3.5 text-sky-glow" />}
+        defaultOpen
+        badge={
+          <span className="font-mono-data text-[10px] text-muted-foreground">
+            {pendingCount.toLocaleString()} pending · {processedCount.toLocaleString()} done
+          </span>
+        }
+      >
+        <div className="space-y-3">
+          <div className="flex items-center justify-between">
+            <div className="font-mono-data text-xs text-muted-foreground">
+              Queue · <span className="text-foreground">{pendingCount.toLocaleString()}</span> pending ·{" "}
+              <span className="text-sky-glow">{processedCount.toLocaleString()}</span> done
+            </div>
+            <div className="font-mono-data text-[10px] uppercase tracking-wider text-muted-foreground">
+              headless
+            </div>
+          </div>
 
-      {/* Quick queue filters */}
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <div className="flex gap-1.5">
-          {(["all", "active", "processed"] as const).map((k) => (
-            <button
-              key={k}
-              type="button"
-              onClick={() => setFilter(k)}
-              className={`rounded-md border px-2.5 py-1 font-mono-data text-[11px] capitalize transition ${
-                filter === k
-                  ? "border-sky-glow/60 bg-sky-glow/10 text-sky-glow glow-sky"
-                  : "border-border-strong/60 bg-surface-2 text-muted-foreground hover:text-foreground"
-              }`}
-            >
-              {k === "active" ? "Active only" : k}
-            </button>
-          ))}
-        </div>
-        <div className="flex items-center gap-1.5">
-          <label className="font-mono-data text-[10px] uppercase tracking-wider text-muted-foreground">
-            Jump to row #
-          </label>
+          {/* Quick queue filters */}
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="flex gap-1.5">
+              {(["all", "active", "processed"] as const).map((k) => (
+                <button
+                  key={k}
+                  type="button"
+                  onClick={() => setFilter(k)}
+                  className={`rounded-md border px-2.5 py-1 font-mono-data text-[11px] capitalize transition ${
+                    filter === k
+                      ? "border-sky-glow/60 bg-sky-glow/10 text-sky-glow glow-sky"
+                      : "border-border-strong/60 bg-surface-2 text-muted-foreground hover:text-foreground"
+                  }`}
+                >
+                  {k === "active" ? "Active only" : k}
+                </button>
+              ))}
+            </div>
+            <div className="flex items-center gap-1.5">
+              <label className="font-mono-data text-[10px] uppercase tracking-wider text-muted-foreground">
+                Jump to row #
+              </label>
           <Input
             type="number"
             min={0}
@@ -3331,10 +3361,11 @@ function SectionACard({
               </button>
             </>
           )}
+          </div>
         </div>
-      </div>
-
-      {/* Active queue email search */}
+        </div>
+      </CollapsibleSection>
+      {/* Active queue email search — stays outside Queue & Filters, always visible */}
       {filter !== "processed" && state.rows.length > 0 && (
         <div className="space-y-2">
           <Input
