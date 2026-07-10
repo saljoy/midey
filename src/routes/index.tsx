@@ -78,7 +78,6 @@ interface PersistedState {
   sendCounter: number;
   dailyGoal: number;
   queueSearchPersisted: string;
-  trackingEnabled: boolean;
   homepageMode: HomepageMode;
   // Row indices (within `rows`, keyed by domainHeader) marked as "done" in
   // Research Mode — auto-set once an email is generated for that lead, and
@@ -242,7 +241,6 @@ const DEFAULT_STATE: PersistedState = {
   sendCounter: 0,
   dailyGoal: 100,
   queueSearchPersisted: "",
-  trackingEnabled: false,
   homepageMode: "research",
   researchDone: {},
   priorityDomain: "",
@@ -525,12 +523,6 @@ function autoFormatHtml(src: string): string {
     })
     .filter(Boolean)
     .join("\n");
-}
-
-function withTrackingPixel(html: string, trackId: string): string {
-  if (typeof window === "undefined" || !trackId) return html;
-  const src = `${window.location.origin}/api/track?id=${encodeURIComponent(trackId)}`;
-  return `${html}<img src="${src}" width="1" height="1" alt="" style="display:none!important;width:1px!important;height:1px!important;border:0" />`;
 }
 
 function cleanEmails(raw: string): string {
@@ -1032,12 +1024,6 @@ function Index() {
         <CollapsibleSection title="Look up by email" icon={<Search className="size-3.5 text-sky-glow" />} defaultOpen={false}>
           <LeadLookupPanel rows={state.rows} headers={state.headers} />
         </CollapsibleSection>
-        <CollapsibleSection title="Open Tracking" icon={<Eye className="size-3.5 text-amber-glow" />} defaultOpen={false} badge={state.trackingEnabled ? <span className="rounded border border-sky-glow/40 bg-sky-glow/10 px-1.5 py-0.5 font-mono-data text-[10px] text-sky-glow">on</span> : undefined}>
-          <AnalyticsPanel
-            trackingEnabled={state.trackingEnabled}
-            onToggle={(v) => patch({ trackingEnabled: v })}
-          />
-        </CollapsibleSection>
         <CollapsibleSection title="API Keys" icon={<Key className="size-3.5 text-sky-glow" />} defaultOpen={apiKeys.length === 0}>
           <GeminiKeyManager keys={apiKeys} onChange={setApiKeys} />
         </CollapsibleSection>
@@ -1069,7 +1055,6 @@ function Index() {
               domainHeader={state.domainHeader}
               geminiCall={geminiCall}
               prompts={prompts}
-              trackingEnabled={state.trackingEnabled}
               doneLeads={state.researchDone}
               onToggleDone={(idx) =>
                 patch({ researchDone: { ...state.researchDone, [idx]: !state.researchDone[idx] } })
@@ -1497,7 +1482,7 @@ function stageForCacheEntry(entry: LeadCacheEntry | undefined): ResearchStage {
 }
 
 function ResearchMode({
-  rows, headers, domainHeader, geminiCall, prompts, trackingEnabled,
+  rows, headers, domainHeader, geminiCall, prompts,
   doneLeads, onToggleDone, onMarkDone,
 }: {
   rows: Row[];
@@ -1505,7 +1490,6 @@ function ResearchMode({
   domainHeader: string;
   geminiCall: (prompt: string, useWebSearch?: boolean) => Promise<string>;
   prompts: PromptSet;
-  trackingEnabled: boolean;
   doneLeads: Record<number, boolean>;
   onToggleDone: (idx: number) => void;
   onMarkDone: (idx: number) => void;
@@ -3305,7 +3289,6 @@ function SectionACard({
             htmlMode={state.htmlMode}
             htmlTpl={rotation.html}
             spinSeed={state.sendCounter}
-            trackingEnabled={state.trackingEnabled}
             onSend={() => {
               fireRow(nextPendingIndex);
               if (activeOverride !== null) {
@@ -3330,7 +3313,7 @@ function SectionACard({
 }
 
 function NextRowPreview({
-  rowIndex, row, targetEmailHeader, countryHeader, subjectTpl, bodyTpl, htmlMode, htmlTpl, onSend, onSkip, isResend, ai, spinSeed, trackingEnabled,
+  rowIndex, row, targetEmailHeader, countryHeader, subjectTpl, bodyTpl, htmlMode, htmlTpl, onSend, onSkip, isResend, ai, spinSeed,
 }: {
   rowIndex: number;
   row: Row | undefined;
@@ -3345,7 +3328,6 @@ function NextRowPreview({
   isResend?: boolean;
   ai: AISettings;
   spinSeed: number;
-  trackingEnabled: boolean;
 }) {
   // ai_insight token removed — tokens are now filled purely from CSV columns
   const extras: Record<string, string> = {};
@@ -3368,10 +3350,7 @@ function NextRowPreview({
     // Snapshot the current row's mailto BEFORE advancing the queue,
     // so re-render from onSend() can't swap in the next row's link.
     const hrefSnapshot = htmlHref;
-    // The tracking pixel is computed HERE — at the moment of an actual
-    // send — never as part of the rendered-on-screen preview above.
-    const outgoingHtml =
-      trackingEnabled && toAddr ? withTrackingPixel(renderedHtml, `${rowIndex}:${toAddr}`) : renderedHtml;
+    const outgoingHtml = renderedHtml;
     try {
       const blobHtml = new Blob([outgoingHtml], { type: "text/html" });
       const blobText = new Blob([outgoingHtml.replace(/<[^>]+>/g, "")], { type: "text/plain" });
@@ -4008,80 +3987,6 @@ function SpamHealthCheck({
   );
 }
 
-/* ===================== Open Tracking Panel ===================== */
+/* ===================== end of file ===================== */
 
-/**
- * Lets the user opt in to invisible-pixel open tracking for HTML-mode
- * sends, and shows a live count by polling the /api/opens Netlify
- * Function (backed by Netlify Blobs). Plain-text mailto sends never get
- * a pixel inserted, since mailto: can't carry an <img> tag — this only
- * affects renderedHtml in NextRowPreview when trackingEnabled is on.
- */
-function AnalyticsPanel({
-  trackingEnabled, onToggle,
-}: {
-  trackingEnabled: boolean;
-  onToggle: (v: boolean) => void;
-}) {
-  const [opens, setOpens] = useState<Record<string, string>>({});
-  const [loading, setLoading] = useState(false);
-
-  const refresh = useCallback(async () => {
-    setLoading(true);
-    try {
-      const res = await fetch("/api/opens");
-      const data = await res.json();
-      setOpens((data?.opens ?? {}) as Record<string, string>);
-    } catch {
-      toast.error("Couldn't load open stats — is /api/opens deployed?");
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    if (trackingEnabled) refresh();
-  }, [trackingEnabled, refresh]);
-
-  const openedCount = Object.keys(opens).length;
-
-  return (
-    <>
-      <label className="flex items-center justify-between gap-3 rounded-lg border border-border-strong/60 bg-surface-2 p-2.5">
-        <span className="flex items-center gap-2 font-mono-data text-[11px] uppercase tracking-wider text-muted-foreground">
-          <Eye className="size-3.5" />
-          Track opens (HTML sends only)
-        </span>
-        <input
-          type="checkbox"
-          checked={trackingEnabled}
-          onChange={(e) => onToggle(e.target.checked)}
-          className="size-4 accent-[var(--sky)]"
-        />
-      </label>
-      {trackingEnabled && (
-        <>
-          <div className="flex items-center justify-between font-mono-data text-[11px]">
-            <span className="text-muted-foreground">
-              <span className="text-sky-glow">{openedCount}</span> opened so far
-            </span>
-            <button
-              type="button"
-              onClick={refresh}
-              disabled={loading}
-              className="text-muted-foreground underline decoration-dotted disabled:opacity-50"
-            >
-              {loading ? "Refreshing…" : "Refresh"}
-            </button>
-          </div>
-          <p className="font-mono-data text-[10px] leading-relaxed text-muted-foreground">
-            Only HTML-mode sends carry a tracking pixel — plain-text mailto sends are never tracked.
-            Apple Mail and some corporate filters pre-fetch images automatically, which inflates counts;
-            treat this as a rough signal, not an exact read rate.
-          </p>
-        </>
-      )}
-    </>
-  );
-}
 
