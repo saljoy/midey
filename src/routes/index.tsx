@@ -327,6 +327,72 @@ function loadPrompts() {
 }
 
 /* ============================================================
+   FULL BACKUP / MIGRATION
+   ============================================================
+   Bundles every piece of the app's data — CSV rows, send progress
+   (rowStates/sendCounter), templates, filters, API keys, prompts, and the
+   Research Mode per-lead cache — into one JSON file. Used to move
+   everything to a new deploy/browser in one shot instead of losing
+   progress or re-entering things by hand. Reads/writes localStorage
+   directly (raw, unparsed by type) so it works regardless of where in the
+   file the relevant interfaces are declared, and so a restore is just a
+   page reload away from every component re-hydrating naturally, the same
+   way it already does on first load.
+   ============================================================ */
+
+const BACKUP_KEYS = {
+  state: STORAGE_KEY,
+  apiKeys: API_KEYS_KEY,
+  prompts: PROMPTS_KEY,
+  leadCache: "midey.research.leadCache.v1",
+} as const;
+
+function buildFullBackup(): string {
+  const bundle: Record<string, unknown> = {
+    app: "Midey",
+    backupVersion: 1,
+    exportedAt: new Date().toISOString(),
+  };
+  for (const [name, key] of Object.entries(BACKUP_KEYS)) {
+    try {
+      const raw = localStorage.getItem(key);
+      bundle[name] = raw ? JSON.parse(raw) : null;
+    } catch {
+      bundle[name] = null;
+    }
+  }
+  return JSON.stringify(bundle, null, 2);
+}
+
+// Writes every section straight back into its localStorage key. Sections
+// missing from an older/partial backup file are simply left untouched
+// rather than wiping them out. Caller is responsible for reloading the
+// page afterward so every component re-hydrates from the restored data.
+function restoreFullBackup(json: string): { ok: boolean; restored: string[]; error?: string } {
+  let parsed: Record<string, unknown>;
+  try {
+    parsed = JSON.parse(json);
+  } catch {
+    return { ok: false, restored: [], error: "That file isn't valid JSON." };
+  }
+  if (!parsed || typeof parsed !== "object" || parsed.app !== "Midey") {
+    return { ok: false, restored: [], error: "That doesn't look like a Midey backup file." };
+  }
+  const restored: string[] = [];
+  for (const [name, key] of Object.entries(BACKUP_KEYS)) {
+    if (parsed[name] === undefined || parsed[name] === null) continue;
+    try {
+      localStorage.setItem(key, JSON.stringify(parsed[name]));
+      restored.push(name);
+    } catch {
+      // Skip whatever section fails to write rather than aborting the
+      // whole restore over one bad section.
+    }
+  }
+  return { ok: restored.length > 0, restored };
+}
+
+/* ============================================================
    GEMINI API UTILITIES
    ============================================================ */
 
@@ -1030,6 +1096,9 @@ function Index() {
         <CollapsibleSection title="Prompt Settings" icon={<Settings className="size-3.5 text-amber-glow" />} defaultOpen={false}>
           <PromptSettingsPanel prompts={prompts} onChange={setPrompts} />
         </CollapsibleSection>
+        <CollapsibleSection title="Backup & Migrate" icon={<Download className="size-3.5 text-sky-glow" />} defaultOpen={false}>
+          <BackupPanel />
+        </CollapsibleSection>
       </SideDrawer>
 
       <main className="mx-auto max-w-5xl px-3 pb-24 pt-4 sm:px-6">
@@ -1353,6 +1422,113 @@ function GeminiKeyManager({ keys, onChange }: { keys: ApiKey[]; onChange: (updat
           <Plus className="size-3.5" /> Add key
         </Button>
       </div>
+    </div>
+  );
+}
+
+/* ============================================================
+   FULL BACKUP / MIGRATE PANEL
+   ============================================================ */
+
+function BackupPanel() {
+  const importInputRef = useRef<HTMLInputElement>(null);
+  const [confirming, setConfirming] = useState(false);
+  const [pendingFile, setPendingFile] = useState<File | null>(null);
+
+  const exportAll = () => {
+    try {
+      const json = buildFullBackup();
+      const blob = new Blob([json], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      const stamp = new Date().toISOString().slice(0, 10);
+      a.href = url;
+      a.download = `midey-backup-${stamp}.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+      toast.success("Backup downloaded");
+    } catch (e) {
+      toast.error(`Export failed: ${(e as Error).message}`);
+    }
+  };
+
+  const runImport = (file: File) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const text = String(reader.result || "");
+      const result = restoreFullBackup(text);
+      if (!result.ok) {
+        toast.error(result.error ?? "Nothing in that file could be restored");
+        return;
+      }
+      toast.success(`Restored ${result.restored.join(", ")} — reloading…`);
+      setTimeout(() => window.location.reload(), 800);
+    };
+    reader.onerror = () => toast.error("Could not read that file");
+    reader.readAsText(file);
+  };
+
+  return (
+    <div className="space-y-3">
+      <p className="font-mono-data text-[10px] leading-relaxed text-muted-foreground">
+        Bundles everything into one file: your CSV rows, send progress (what's been sent/skipped and your counters),
+        templates, priority filters, API keys, prompts, and everything cached in Research Mode. Use this to move
+        to a new deploy or browser without starting over.
+      </p>
+
+      <button
+        type="button"
+        onClick={exportAll}
+        className="flex w-full items-center justify-center gap-1.5 rounded-md border border-sky-glow/40 bg-sky-glow/10 py-2.5 font-mono-data text-[11px] text-sky-glow hover:bg-sky-glow/20"
+      >
+        <Download className="size-3.5" /> Export everything (.json)
+      </button>
+
+      <button
+        type="button"
+        onClick={() => importInputRef.current?.click()}
+        className="flex w-full items-center justify-center gap-1.5 rounded-md border border-border-strong/60 py-2.5 font-mono-data text-[11px] text-muted-foreground hover:text-foreground"
+      >
+        <Upload className="size-3.5" /> Import everything (.json)
+      </button>
+      <input
+        ref={importInputRef}
+        type="file"
+        accept=".json,application/json"
+        className="hidden"
+        onChange={(e) => {
+          const file = e.target.files?.[0];
+          e.target.value = "";
+          if (file) { setPendingFile(file); setConfirming(true); }
+        }}
+      />
+
+      {confirming && pendingFile && (
+        <div className="rounded-lg border border-amber-glow/40 bg-amber-glow/5 p-3 space-y-2">
+          <p className="font-mono-data text-[11px] text-amber-glow">
+            This replaces your current CSV, templates, send progress, API keys, and prompts with what's in{" "}
+            <span className="text-foreground">{pendingFile.name}</span>. This can't be undone — export your current
+            data first if you're not sure.
+          </p>
+          <div className="flex gap-2">
+            <Button
+              size="sm"
+              onClick={() => { const f = pendingFile; setConfirming(false); setPendingFile(null); if (f) runImport(f); }}
+              className="flex-1 glow-amber bg-[var(--amber)] text-black hover:bg-[var(--amber)]/90"
+            >
+              Yes, restore and reload
+            </Button>
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={() => { setConfirming(false); setPendingFile(null); }}
+              className="flex-1"
+            >
+              Cancel
+            </Button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
