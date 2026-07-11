@@ -3059,14 +3059,20 @@ function SectionACard({
                 type="button"
                 onClick={async () => {
                   try {
-                    await navigator.clipboard.writeText(liveRenderedHtml);
-                    toast.success("Rendered HTML copied");
-                  } catch {
-                    toast.error("Clipboard failed");
+                    const blobHtml = new Blob([liveRenderedHtml], { type: "text/html" });
+                    const blobText = new Blob([liveRenderedHtml.replace(/<[^>]+>/g, "")], { type: "text/plain" });
+                    if ("ClipboardItem" in window && navigator.clipboard?.write) {
+                      await navigator.clipboard.write([new ClipboardItem({ "text/html": blobHtml, "text/plain": blobText })]);
+                    } else {
+                      await navigator.clipboard.writeText(liveRenderedHtml);
+                    }
+                    toast.success("Template copied — paste into Gmail as a formatted email");
+                  } catch (e) {
+                    toast.error(`Clipboard failed: ${(e as Error).message}`);
                   }
                 }}
                 className="flex items-center gap-1 rounded-md border border-border-strong/60 bg-surface-2 px-2 py-1 font-mono-data text-[10px] text-muted-foreground hover:text-foreground"
-                title="Copy the fully rendered HTML (tokens already filled in), not the raw {token} template"
+                title="Copy the fully rendered email (tokens already filled in) as formatted content, ready to paste into Gmail"
               >
                 <Copy className="size-3" /> Copy template
               </button>
