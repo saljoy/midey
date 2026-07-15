@@ -571,7 +571,7 @@ function extractContactEmail(brief: string): string {
   const matches = brief.match(EMAIL_IN_TEXT_RE) ?? [];
   if (matches.length === 0) return "";
   const direct = matches.find((e) => !GENERIC_INBOX_RE.test(e));
-  return direct ?? matches[0];
+  return direct ?? matches[0] ?? "";
 }
 
 function fmtDuration(s: number): string {
@@ -1931,7 +1931,7 @@ function ResearchMode({
                       : "text-muted-foreground hover:text-foreground"
                   }`}
                 >
-                  #{e.approach} {e.title}
+                  #{i + 1} {e.title}
                 </button>
               ))}
             </div>
