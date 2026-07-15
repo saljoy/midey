@@ -15,7 +15,7 @@ export const Route = createFileRoute("/api/opens")({
           await Promise.all(
             blobs.map(async (b) => {
               try {
-                const v = await store.get(b.key);
+                const v = await store.get(b.key, { type: "text" });
                 if (v) entries[b.key] = v;
               } catch {
                 // Skip any individual key that fails to read.
