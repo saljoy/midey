@@ -40,7 +40,7 @@ export const Route = createFileRoute("/api/track")({
             // refetch the same pixel more than once).
             let existing: string | null = null;
             try {
-              existing = await store.get(id);
+              existing = await store.get(id, { type: "text" });
             } catch {
               existing = null;
             }
