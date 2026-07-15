@@ -544,10 +544,18 @@ function expandSpintax(src: string, seed: number): string {
   const inner = /\{([^{}]*\|[^{}]*)\}/;
   let out = src;
   let guard = 0;
+  let groupIdx = 0;
   while (inner.test(out) && guard++ < 500) {
     out = out.replace(inner, (_, body: string) => {
       const opts = body.split("|");
-      const idx = ((seed % opts.length) + opts.length) % opts.length;
+      // Sequential per-email pattern: each spintax group advances one step
+      // per row (seed = sendCounter), and each group has its own offset based
+      // on its position in the template so groups don't all collapse to the
+      // same relative choice. Result: email N picks option (N + groupIdx) %
+      // opts.length for the g-th group — fully deterministic, no randomness.
+      const raw = seed + groupIdx;
+      const idx = ((raw % opts.length) + opts.length) % opts.length;
+      groupIdx++;
       return opts[idx] ?? "";
     });
   }
