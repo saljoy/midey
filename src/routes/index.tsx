@@ -327,6 +327,72 @@ function loadPrompts() {
 }
 
 /* ============================================================
+   FULL BACKUP / MIGRATION
+   ============================================================
+   Bundles every piece of the app's data — CSV rows, send progress
+   (rowStates/sendCounter), templates, filters, API keys, prompts, and the
+   Research Mode per-lead cache — into one JSON file. Used to move
+   everything to a new deploy/browser in one shot instead of losing
+   progress or re-entering things by hand. Reads/writes localStorage
+   directly (raw, unparsed by type) so it works regardless of where in the
+   file the relevant interfaces are declared, and so a restore is just a
+   page reload away from every component re-hydrating naturally, the same
+   way it already does on first load.
+   ============================================================ */
+
+const BACKUP_KEYS = {
+  state: STORAGE_KEY,
+  apiKeys: API_KEYS_KEY,
+  prompts: PROMPTS_KEY,
+  leadCache: "midey.research.leadCache.v1",
+} as const;
+
+function buildFullBackup(): string {
+  const bundle: Record<string, unknown> = {
+    app: "Midey",
+    backupVersion: 1,
+    exportedAt: new Date().toISOString(),
+  };
+  for (const [name, key] of Object.entries(BACKUP_KEYS)) {
+    try {
+      const raw = localStorage.getItem(key);
+      bundle[name] = raw ? JSON.parse(raw) : null;
+    } catch {
+      bundle[name] = null;
+    }
+  }
+  return JSON.stringify(bundle, null, 2);
+}
+
+// Writes every section straight back into its localStorage key. Sections
+// missing from an older/partial backup file are simply left untouched
+// rather than wiping them out. Caller is responsible for reloading the
+// page afterward so every component re-hydrates from the restored data.
+function restoreFullBackup(json: string): { ok: boolean; restored: string[]; error?: string } {
+  let parsed: Record<string, unknown>;
+  try {
+    parsed = JSON.parse(json);
+  } catch {
+    return { ok: false, restored: [], error: "That file isn't valid JSON." };
+  }
+  if (!parsed || typeof parsed !== "object" || parsed.app !== "Midey") {
+    return { ok: false, restored: [], error: "That doesn't look like a Midey backup file." };
+  }
+  const restored: string[] = [];
+  for (const [name, key] of Object.entries(BACKUP_KEYS)) {
+    if (parsed[name] === undefined || parsed[name] === null) continue;
+    try {
+      localStorage.setItem(key, JSON.stringify(parsed[name]));
+      restored.push(name);
+    } catch {
+      // Skip whatever section fails to write rather than aborting the
+      // whole restore over one bad section.
+    }
+  }
+  return { ok: restored.length > 0, restored };
+}
+
+/* ============================================================
    GEMINI API UTILITIES
    ============================================================ */
 
@@ -525,6 +591,70 @@ function autoFormatHtml(src: string): string {
     .join("\n");
 }
 
+// Parses one CSV or XLSX file into headers + rows, same header-sanitizing
+// rules as the main Lead List uploader. Used by the CSV Merge tool, which
+// needs to await several files one at a time rather than stream one huge
+// file with progress callbacks.
+function parseFileToTable(file: File): Promise<{ headers: string[]; rows: Row[] }> {
+  return new Promise((resolve, reject) => {
+    const isExcel = /\.xlsx?$/i.test(file.name);
+    if (isExcel) {
+      const reader = new FileReader();
+      reader.onerror = () => reject(new Error(`Failed to read ${file.name}`));
+      reader.onload = (e) => {
+        try {
+          const data = new Uint8Array(e.target?.result as ArrayBuffer);
+          const wb = XLSX.read(data, { type: "array" });
+          const sheetName = wb.SheetNames[0];
+          if (!sheetName) throw new Error(`${file.name}: workbook has no sheets`);
+          const sheet = wb.Sheets[sheetName];
+          const aoa = XLSX.utils.sheet_to_json<unknown[]>(sheet, { header: 1, blankrows: false, defval: "", raw: false });
+          if (!aoa.length) throw new Error(`${file.name}: sheet is empty`);
+          const seen = new Set<string>();
+          const rawHeaders = (aoa[0] as unknown[]).map((h) => String(h ?? "").trim());
+          const headers = rawHeaders.filter((h) => {
+            if (!h || h.length > 64 || /[,\n\r"]/.test(h) || seen.has(h)) return false;
+            seen.add(h); return true;
+          });
+          const rows: Row[] = [];
+          for (let i = 1; i < aoa.length; i++) {
+            const row = aoa[i] as unknown[];
+            const obj: Row = {};
+            for (let c = 0; c < rawHeaders.length; c++) {
+              const key = rawHeaders[c];
+              if (!key || !headers.includes(key)) continue;
+              obj[key] = String(row?.[c] ?? "");
+            }
+            rows.push(obj);
+          }
+          resolve({ headers, rows });
+        } catch (err) { reject(err as Error); }
+      };
+      reader.readAsArrayBuffer(file);
+      return;
+    }
+    const collected: Row[] = [];
+    let headers: string[] = [];
+    Papa.parse<Row>(file, {
+      header: true,
+      skipEmptyLines: true,
+      chunkSize: 1024 * 1024,
+      chunk: (results) => {
+        if (!headers.length && results.meta.fields) {
+          const seen = new Set<string>();
+          headers = results.meta.fields.map((h) => (h ?? "").trim()).filter((h) => {
+            if (!h || h.length > 64 || /[,\n\r"]/.test(h) || seen.has(h)) return false;
+            seen.add(h); return true;
+          });
+        }
+        for (const r of results.data) collected.push(r);
+      },
+      complete: () => resolve({ headers, rows: collected }),
+      error: (err) => reject(err),
+    });
+  });
+}
+
 function cleanEmails(raw: string): string {
   // Some lead lists separate multiple addresses in one cell with ":" instead
   // of a comma. Gmail (and mailto:) only treats comma/semicolon as "send to
@@ -571,7 +701,7 @@ function extractContactEmail(brief: string): string {
   const matches = brief.match(EMAIL_IN_TEXT_RE) ?? [];
   if (matches.length === 0) return "";
   const direct = matches.find((e) => !GENERIC_INBOX_RE.test(e));
-  return direct ?? matches[0] ?? "";
+  return direct ?? matches[0];
 }
 
 function fmtDuration(s: number): string {
@@ -1021,14 +1151,17 @@ function Index() {
             onCountryHeader={(v) => patch({ countryHeader: v })}
           />
         </CollapsibleSection>
-        <CollapsibleSection title="Look up by email" icon={<Search className="size-3.5 text-sky-glow" />} defaultOpen={false}>
-          <LeadLookupPanel rows={state.rows} headers={state.headers} />
-        </CollapsibleSection>
         <CollapsibleSection title="API Keys" icon={<Key className="size-3.5 text-sky-glow" />} defaultOpen={apiKeys.length === 0}>
           <GeminiKeyManager keys={apiKeys} onChange={setApiKeys} />
         </CollapsibleSection>
         <CollapsibleSection title="Prompt Settings" icon={<Settings className="size-3.5 text-amber-glow" />} defaultOpen={false}>
           <PromptSettingsPanel prompts={prompts} onChange={setPrompts} />
+        </CollapsibleSection>
+        <CollapsibleSection title="Backup & Migrate" icon={<Download className="size-3.5 text-sky-glow" />} defaultOpen={false}>
+          <BackupPanel />
+        </CollapsibleSection>
+        <CollapsibleSection title="Merge CSV Files" icon={<Layers className="size-3.5 text-amber-glow" />} defaultOpen={false}>
+          <CsvMergePanel />
         </CollapsibleSection>
       </SideDrawer>
 
@@ -1353,6 +1486,315 @@ function GeminiKeyManager({ keys, onChange }: { keys: ApiKey[]; onChange: (updat
           <Plus className="size-3.5" /> Add key
         </Button>
       </div>
+    </div>
+  );
+}
+
+/* ============================================================
+   FULL BACKUP / MIGRATE PANEL
+   ============================================================ */
+
+function BackupPanel() {
+  const importInputRef = useRef<HTMLInputElement>(null);
+  const [confirming, setConfirming] = useState(false);
+  const [pendingFile, setPendingFile] = useState<File | null>(null);
+
+  const exportAll = () => {
+    try {
+      const json = buildFullBackup();
+      const blob = new Blob([json], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      const stamp = new Date().toISOString().slice(0, 10);
+      a.href = url;
+      a.download = `midey-backup-${stamp}.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+      toast.success("Backup downloaded");
+    } catch (e) {
+      toast.error(`Export failed: ${(e as Error).message}`);
+    }
+  };
+
+  const runImport = (file: File) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const text = String(reader.result || "");
+      const result = restoreFullBackup(text);
+      if (!result.ok) {
+        toast.error(result.error ?? "Nothing in that file could be restored");
+        return;
+      }
+      toast.success(`Restored ${result.restored.join(", ")} — reloading…`);
+      setTimeout(() => window.location.reload(), 800);
+    };
+    reader.onerror = () => toast.error("Could not read that file");
+    reader.readAsText(file);
+  };
+
+  return (
+    <div className="space-y-3">
+      <p className="font-mono-data text-[10px] leading-relaxed text-muted-foreground">
+        Bundles everything into one file: your CSV rows, send progress (what's been sent/skipped and your counters),
+        templates, priority filters, API keys, prompts, and everything cached in Research Mode. Use this to move
+        to a new deploy or browser without starting over.
+      </p>
+
+      <button
+        type="button"
+        onClick={exportAll}
+        className="flex w-full items-center justify-center gap-1.5 rounded-md border border-sky-glow/40 bg-sky-glow/10 py-2.5 font-mono-data text-[11px] text-sky-glow hover:bg-sky-glow/20"
+      >
+        <Download className="size-3.5" /> Export everything (.json)
+      </button>
+
+      <button
+        type="button"
+        onClick={() => importInputRef.current?.click()}
+        className="flex w-full items-center justify-center gap-1.5 rounded-md border border-border-strong/60 py-2.5 font-mono-data text-[11px] text-muted-foreground hover:text-foreground"
+      >
+        <Upload className="size-3.5" /> Import everything (.json)
+      </button>
+      <input
+        ref={importInputRef}
+        type="file"
+        accept=".json,application/json"
+        className="hidden"
+        onChange={(e) => {
+          const file = e.target.files?.[0];
+          e.target.value = "";
+          if (file) { setPendingFile(file); setConfirming(true); }
+        }}
+      />
+
+      {confirming && pendingFile && (
+        <div className="rounded-lg border border-amber-glow/40 bg-amber-glow/5 p-3 space-y-2">
+          <p className="font-mono-data text-[11px] text-amber-glow">
+            This replaces your current CSV, templates, send progress, API keys, and prompts with what's in{" "}
+            <span className="text-foreground">{pendingFile.name}</span>. This can't be undone — export your current
+            data first if you're not sure.
+          </p>
+          <div className="flex gap-2">
+            <Button
+              size="sm"
+              onClick={() => { const f = pendingFile; setConfirming(false); setPendingFile(null); if (f) runImport(f); }}
+              className="flex-1 glow-amber bg-[var(--amber)] text-black hover:bg-[var(--amber)]/90"
+            >
+              Yes, restore and reload
+            </Button>
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={() => { setConfirming(false); setPendingFile(null); }}
+              className="flex-1"
+            >
+              Cancel
+            </Button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ============================================================
+   CSV MERGE TOOL
+   ============================================================
+   Lets you add several CSV/XLSX files, merges them into one table (union
+   of all columns, rows with a matching email address get their columns
+   merged together rather than duplicated — first non-empty value per
+   field wins), and downloads the result as a single CSV. Fully separate
+   from the live queue/CSV in Lead List settings — nothing here touches
+   your active send queue until you re-upload the merged file there
+   yourself. "Clear cache" frees whatever this tool is holding in memory
+   without touching anything else in the app.
+   ============================================================ */
+
+interface MergeFile {
+  id: string;
+  name: string;
+  headers: string[];
+  rows: Row[];
+  emailHeader: string;
+}
+
+function CsvMergePanel() {
+  const [files, setFiles] = useState<MergeFile[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [merged, setMerged] = useState<{ headers: string[]; rows: Row[] } | null>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  const totalRowsHeld = files.reduce((sum, f) => sum + f.rows.length, 0) + (merged?.rows.length ?? 0);
+
+  const addFiles = async (fileList: FileList) => {
+    setLoading(true);
+    let added = 0;
+    for (const file of Array.from(fileList)) {
+      try {
+        const { headers, rows } = await parseFileToTable(file);
+        const emailHeader = headers.find((h) => /e?mail/i.test(h)) ?? "";
+        setFiles((prev) => [...prev, { id: `f_${Math.random().toString(36).slice(2, 9)}`, name: file.name, headers, rows, emailHeader }]);
+        added++;
+      } catch (err) {
+        toast.error(`${file.name}: ${(err as Error).message}`);
+      }
+    }
+    setLoading(false);
+    setMerged(null); // stale once the input set changes
+    if (added > 0) toast.success(`Added ${added} file${added > 1 ? "s" : ""}`);
+  };
+
+  const removeFile = (id: string) => {
+    setFiles((prev) => prev.filter((f) => f.id !== id));
+    setMerged(null);
+  };
+
+  const runMerge = () => {
+    if (files.length === 0) return;
+    // Union of headers, in first-seen order across all files.
+    const headerOrder: string[] = [];
+    const headerSeen = new Set<string>();
+    for (const f of files) {
+      for (const h of f.headers) {
+        if (!headerSeen.has(h)) { headerSeen.add(h); headerOrder.push(h); }
+      }
+    }
+
+    const byKey = new Map<string, Row>();
+    const noKeyRows: Row[] = [];
+
+    for (const f of files) {
+      for (const row of f.rows) {
+        const emailVal = f.emailHeader ? String(row[f.emailHeader] ?? "").trim().toLowerCase() : "";
+        if (!emailVal) { noKeyRows.push(row); continue; }
+        const existing = byKey.get(emailVal);
+        if (!existing) {
+          const fresh: Row = {};
+          for (const h of headerOrder) fresh[h] = String(row[h] ?? "");
+          byKey.set(emailVal, fresh);
+        } else {
+          // First non-empty value per field wins — a blank cell from a
+          // later file never overwrites a value already found.
+          for (const h of headerOrder) {
+            const cur = (existing[h] ?? "").trim();
+            const incoming = String(row[h] ?? "").trim();
+            if (!cur && incoming) existing[h] = incoming;
+          }
+        }
+      }
+    }
+
+    const mergedRows = [...byKey.values(), ...noKeyRows];
+    setMerged({ headers: headerOrder, rows: mergedRows });
+    toast.success(`Merged into ${mergedRows.length.toLocaleString()} rows · ${headerOrder.length} columns`);
+  };
+
+  const downloadMerged = () => {
+    if (!merged) return;
+    try {
+      const csv = Papa.unparse({ fields: merged.headers, data: merged.rows.map((r) => merged.headers.map((h) => r[h] ?? "")) });
+      const blob = new Blob([csv], { type: "text/csv" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      const stamp = new Date().toISOString().slice(0, 10);
+      a.href = url;
+      a.download = `merged-leads-${stamp}.csv`;
+      a.click();
+      URL.revokeObjectURL(url);
+      toast.success("Merged CSV downloaded");
+    } catch (e) {
+      toast.error(`Download failed: ${(e as Error).message}`);
+    }
+  };
+
+  const clearCache = () => {
+    setFiles([]);
+    setMerged(null);
+    toast.success("Merge tool cache cleared");
+  };
+
+  return (
+    <div className="space-y-3">
+      <p className="font-mono-data text-[10px] leading-relaxed text-muted-foreground">
+        Add several CSV or Excel files, merge them into one table, and download a single CSV. Rows sharing the same
+        email address get merged into one row (columns filled in from whichever file has them) instead of duplicated.
+        This is a separate scratch space — nothing here touches your active Lead List until you upload the merged
+        file there yourself.
+      </p>
+
+      <input
+        ref={inputRef}
+        type="file"
+        multiple
+        accept=".csv,.xlsx,.xls"
+        className="hidden"
+        onChange={(e) => {
+          const fl = e.target.files;
+          e.target.value = "";
+          if (fl && fl.length > 0) addFiles(fl);
+        }}
+      />
+      <button
+        type="button"
+        onClick={() => inputRef.current?.click()}
+        disabled={loading}
+        className="flex w-full items-center justify-center gap-1.5 rounded-md border border-border-strong/60 py-2.5 font-mono-data text-[11px] text-muted-foreground hover:text-foreground disabled:opacity-50"
+      >
+        <Upload className="size-3.5" /> {loading ? "Parsing…" : "Add CSV / Excel files"}
+      </button>
+
+      {files.length > 0 && (
+        <div className="space-y-1.5">
+          {files.map((f) => (
+            <div key={f.id} className="flex items-center gap-2 rounded-md border border-border-strong/40 bg-surface-2 px-2.5 py-1.5">
+              <FileText className="size-3.5 shrink-0 text-muted-foreground" />
+              <div className="min-w-0 flex-1">
+                <p className="truncate font-mono-data text-[11px] text-foreground">{f.name}</p>
+                <p className="font-mono-data text-[10px] text-muted-foreground">
+                  {f.rows.length.toLocaleString()} rows · {f.headers.length} cols
+                  {!f.emailHeader && <span className="text-amber-glow"> · no email column detected</span>}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => removeFile(f.id)}
+                className="shrink-0 rounded p-1 text-muted-foreground hover:text-destructive"
+                aria-label={`Remove ${f.name}`}
+              >
+                <X className="size-3.5" />
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {files.length > 0 && (
+        <Button onClick={runMerge} className="w-full glow-sky">
+          <Layers className="size-3.5" /> Merge {files.length} file{files.length > 1 ? "s" : ""}
+        </Button>
+      )}
+
+      {merged && (
+        <div className="space-y-2 rounded-lg border border-sky-glow/40 bg-sky-glow/5 p-3">
+          <p className="font-mono-data text-[11px] text-sky-glow">
+            {merged.rows.length.toLocaleString()} merged rows · {merged.headers.length} columns
+          </p>
+          <Button onClick={downloadMerged} className="w-full glow-sky">
+            <Download className="size-3.5" /> Download merged CSV
+          </Button>
+        </div>
+      )}
+
+      <button
+        type="button"
+        onClick={clearCache}
+        disabled={files.length === 0 && !merged}
+        className="flex w-full items-center justify-center gap-1.5 rounded-md border border-destructive/40 py-2 font-mono-data text-[10px] text-destructive hover:bg-destructive/10 disabled:opacity-40"
+        title="Frees whatever this tool is holding in memory — doesn't touch your Lead List or anything else"
+      >
+        <Trash2 className="size-3" /> Clear cache
+        {totalRowsHeld > 0 && <span className="text-muted-foreground">({totalRowsHeld.toLocaleString()} rows in memory)</span>}
+      </button>
     </div>
   );
 }
@@ -1931,7 +2373,7 @@ function ResearchMode({
                       : "text-muted-foreground hover:text-foreground"
                   }`}
                 >
-                  #{i + 1} {e.title}
+                  #{e.approach} {e.title}
                 </button>
               ))}
             </div>
@@ -2239,6 +2681,14 @@ function Header({
   return (
     <header className="sticky top-0 z-30 border-b border-border-strong/60 bg-bg-app/80 backdrop-blur supports-[backdrop-filter]:bg-bg-app/60">
       <div className="mx-auto flex max-w-5xl items-center gap-2 px-3 py-3 sm:px-6">
+        <Button variant="ghost" size="icon" onClick={onOpenDrawer} aria-label="Open settings">
+          <Menu className="size-4" />
+        </Button>
+
+        <Button variant="ghost" size="icon" onClick={onToggleTheme} aria-label="Toggle theme">
+          {theme === "dark" ? <Sun className="size-4" /> : <Moon className="size-4" />}
+        </Button>
+
         <div className="flex min-w-0 flex-1 items-center gap-2">
           <div className="grid size-9 place-items-center rounded-md bg-surface-2 glow-sky">
             <Mail className="size-4 text-sky-glow" />
@@ -2290,10 +2740,6 @@ function Header({
           </button>
         </div>
 
-        <Button variant="ghost" size="icon" onClick={onToggleTheme} aria-label="Toggle theme">
-          {theme === "dark" ? <Sun className="size-4" /> : <Moon className="size-4" />}
-        </Button>
-
         <Dialog open={open} onOpenChange={setOpen}>
           <DialogTrigger asChild>
             <Button variant="ghost" size="icon" aria-label="Clear all data">
@@ -2315,10 +2761,6 @@ function Header({
             </DialogFooter>
           </DialogContent>
         </Dialog>
-
-        <Button variant="ghost" size="icon" onClick={onOpenDrawer} aria-label="Open settings">
-          <Menu className="size-4" />
-        </Button>
       </div>
     </header>
   );
@@ -2748,6 +3190,14 @@ function SectionACard({
         />
       </label>
 
+      <CollapsibleSection
+        title="Look up by email"
+        icon={<Search className="size-3.5 text-sky-glow" />}
+        defaultOpen={false}
+      >
+        <LeadLookupPanel rows={state.rows} headers={state.headers} />
+      </CollapsibleSection>
+
       {/* Active Template Dropdown + rotation toggles */}
       <CollapsibleSection
         title="Active Template & Rotation"
@@ -2878,14 +3328,20 @@ function SectionACard({
                 type="button"
                 onClick={async () => {
                   try {
-                    await navigator.clipboard.writeText(liveRenderedHtml);
-                    toast.success("Rendered HTML copied");
-                  } catch {
-                    toast.error("Clipboard failed");
+                    const blobHtml = new Blob([liveRenderedHtml], { type: "text/html" });
+                    const blobText = new Blob([liveRenderedHtml.replace(/<[^>]+>/g, "")], { type: "text/plain" });
+                    if ("ClipboardItem" in window && navigator.clipboard?.write) {
+                      await navigator.clipboard.write([new ClipboardItem({ "text/html": blobHtml, "text/plain": blobText })]);
+                    } else {
+                      await navigator.clipboard.writeText(liveRenderedHtml);
+                    }
+                    toast.success("Template copied — paste into Gmail as a formatted email");
+                  } catch (e) {
+                    toast.error(`Clipboard failed: ${(e as Error).message}`);
                   }
                 }}
                 className="flex items-center gap-1 rounded-md border border-border-strong/60 bg-surface-2 px-2 py-1 font-mono-data text-[10px] text-muted-foreground hover:text-foreground"
-                title="Copy the fully rendered HTML (tokens already filled in), not the raw {token} template"
+                title="Copy the fully rendered email (tokens already filled in) as formatted content, ready to paste into Gmail"
               >
                 <Copy className="size-3" /> Copy template
               </button>
@@ -2901,86 +3357,100 @@ function SectionACard({
           </div>
 
           {/* Test sandbox */}
-          <div className="space-y-2 rounded-lg border border-amber-glow/40 bg-amber-glow/5 p-3">
-            <div className="flex items-center gap-2 font-mono-data text-[10px] uppercase tracking-wider text-amber-glow">
-              <Zap className="size-3.5" /> Test sandbox · does not advance queue
+          <CollapsibleSection
+            title="Test Sandbox"
+            icon={<Zap className="size-3.5 text-amber-glow" />}
+            defaultOpen={false}
+          >
+            <div className="space-y-2 rounded-lg border border-amber-glow/40 bg-amber-glow/5 p-3">
+              <div className="flex items-center gap-2 font-mono-data text-[10px] uppercase tracking-wider text-amber-glow">
+                <Zap className="size-3.5" /> Does not advance queue
+              </div>
+              <div className="grid gap-2 sm:grid-cols-2">
+                <Input
+                  type="email"
+                  value={state.recipientB}
+                  onChange={(e) => patch({ recipientB: e.target.value })}
+                  placeholder="manual test email"
+                  className="h-9 font-mono-data text-xs"
+                />
+                <Input
+                  type="number"
+                  min={0}
+                  max={Math.max(0, state.rows.length - 1)}
+                  value={state.sampleIdB}
+                  onChange={(e) => patch({ sampleIdB: Math.max(0, Number(e.target.value) || 0) })}
+                  placeholder="sample row id"
+                  className="h-9 font-mono-data text-xs"
+                />
+              </div>
+              <Button
+                size="sm"
+                onClick={executeTestHtml}
+                className="glow-amber w-full bg-[var(--amber)] text-black hover:bg-[var(--amber)]/90"
+              >
+                <Copy className="size-3.5" /> Send test draft
+              </Button>
+              <p className="font-mono-data text-[10px] text-muted-foreground">
+                Subject preview: <span className="text-amber-glow">{renderedTestSubject || "—"}</span>
+              </p>
             </div>
-            <div className="grid gap-2 sm:grid-cols-2">
-              <Input
-                type="email"
-                value={state.recipientB}
-                onChange={(e) => patch({ recipientB: e.target.value })}
-                placeholder="manual test email"
-                className="h-9 font-mono-data text-xs"
-              />
-              <Input
-                type="number"
-                min={0}
-                max={Math.max(0, state.rows.length - 1)}
-                value={state.sampleIdB}
-                onChange={(e) => patch({ sampleIdB: Math.max(0, Number(e.target.value) || 0) })}
-                placeholder="sample row id"
-                className="h-9 font-mono-data text-xs"
-              />
-            </div>
-            <Button
-              size="sm"
-              onClick={executeTestHtml}
-              className="glow-amber w-full bg-[var(--amber)] text-black hover:bg-[var(--amber)]/90"
-            >
-              <Copy className="size-3.5" /> Send test draft
-            </Button>
-            <p className="font-mono-data text-[10px] text-muted-foreground">
-              Subject preview: <span className="text-amber-glow">{renderedTestSubject || "—"}</span>
-            </p>
-          </div>
+          </CollapsibleSection>
         </>
       ) : (
         <>
-          <Field label="Plain-text body template">
-            <Textarea
-              value={activeTemplate.body}
-              onChange={(e) => updateTemplate(activeTemplate.id, { body: e.target.value })}
-              rows={6}
-              className="font-mono-data text-[13px]"
-              placeholder="Hi {first_name}, …"
-            />
-          </Field>
+          <CollapsibleSection
+            title="Plain-Text Body Template"
+            icon={<FileText className="size-3.5 text-sky-glow" />}
+            defaultOpen
+          >
+            <div className="space-y-3">
+              <Field label="Plain-text body template">
+                <Textarea
+                  value={activeTemplate.body}
+                  onChange={(e) => updateTemplate(activeTemplate.id, { body: e.target.value })}
+                  rows={6}
+                  className="font-mono-data text-[13px]"
+                  placeholder="Hi {first_name}, …"
+                />
+              </Field>
 
-          {/* Test sandbox · plain text */}
-          <div className="space-y-2 rounded-lg border border-amber-glow/40 bg-amber-glow/5 p-3">
-            <div className="flex items-center gap-2 font-mono-data text-[10px] uppercase tracking-wider text-amber-glow">
-              <Zap className="size-3.5" /> Test sandbox · does not advance queue
+              {/* Test sandbox · plain text */}
+              <div className="space-y-2 rounded-lg border border-amber-glow/40 bg-amber-glow/5 p-3">
+                <div className="flex items-center gap-2 font-mono-data text-[10px] uppercase tracking-wider text-amber-glow">
+                  <Zap className="size-3.5" /> Test sandbox · does not advance queue
+                </div>
+                <div className="grid gap-2 sm:grid-cols-2">
+                  <Input
+                    type="email"
+                    value={state.recipientB}
+                    onChange={(e) => patch({ recipientB: e.target.value })}
+                    placeholder="manual test email"
+                    className="h-9 font-mono-data text-xs"
+                  />
+                  <Input
+                    type="number"
+                    min={0}
+                    max={Math.max(0, state.rows.length - 1)}
+                    value={state.sampleIdB}
+                    onChange={(e) => patch({ sampleIdB: Math.max(0, Number(e.target.value) || 0) })}
+                    placeholder="sample row id"
+                    className="h-9 font-mono-data text-xs"
+                  />
+                </div>
+                <Button
+                  size="sm"
+                  onClick={executeTestPlain}
+                  className="glow-amber w-full bg-[var(--amber)] text-black hover:bg-[var(--amber)]/90"
+                >
+                  <Copy className="size-3.5" /> Send test draft
+                </Button>
+                <p className="font-mono-data text-[10px] text-muted-foreground">
+                  Subject preview: <span className="text-amber-glow">{renderedTestSubjectPlain || "—"}</span>
+                </p>
+              </div>
             </div>
-            <div className="grid gap-2 sm:grid-cols-2">
-              <Input
-                type="email"
-                value={state.recipientB}
-                onChange={(e) => patch({ recipientB: e.target.value })}
-                placeholder="manual test email"
-                className="h-9 font-mono-data text-xs"
-              />
-              <Input
-                type="number"
-                min={0}
-                max={Math.max(0, state.rows.length - 1)}
-                value={state.sampleIdB}
-                onChange={(e) => patch({ sampleIdB: Math.max(0, Number(e.target.value) || 0) })}
-                placeholder="sample row id"
-                className="h-9 font-mono-data text-xs"
-              />
-            </div>
-            <Button
-              size="sm"
-              onClick={executeTestPlain}
-              className="glow-amber w-full bg-[var(--amber)] text-black hover:bg-[var(--amber)]/90"
-            >
-              <Copy className="size-3.5" /> Send test draft
-            </Button>
-            <p className="font-mono-data text-[10px] text-muted-foreground">
-              Subject preview: <span className="text-amber-glow">{renderedTestSubjectPlain || "—"}</span>
-            </p>
-          </div>
+          </CollapsibleSection>
         </>
       )}
       <div className="flex flex-wrap items-center justify-between gap-2 -mt-2">
@@ -2996,38 +3466,49 @@ function SectionACard({
         )}
       </div>
 
-      <div className="flex items-center justify-between">
-        <div className="font-mono-data text-xs text-muted-foreground">
-          Queue · <span className="text-foreground">{pendingCount.toLocaleString()}</span> pending ·{" "}
-          <span className="text-sky-glow">{processedCount.toLocaleString()}</span> done
-        </div>
-        <div className="font-mono-data text-[10px] uppercase tracking-wider text-muted-foreground">
-          headless
-        </div>
-      </div>
+      <CollapsibleSection
+        title="Queue & Filters"
+        icon={<Layers className="size-3.5 text-sky-glow" />}
+        defaultOpen
+        badge={
+          <span className="font-mono-data text-[10px] text-muted-foreground">
+            {pendingCount.toLocaleString()} pending · {processedCount.toLocaleString()} done
+          </span>
+        }
+      >
+        <div className="space-y-3">
+          <div className="flex items-center justify-between">
+            <div className="font-mono-data text-xs text-muted-foreground">
+              Queue · <span className="text-foreground">{pendingCount.toLocaleString()}</span> pending ·{" "}
+              <span className="text-sky-glow">{processedCount.toLocaleString()}</span> done
+            </div>
+            <div className="font-mono-data text-[10px] uppercase tracking-wider text-muted-foreground">
+              headless
+            </div>
+          </div>
 
-      {/* Quick queue filters */}
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <div className="flex gap-1.5">
-          {(["all", "active", "processed"] as const).map((k) => (
-            <button
-              key={k}
-              type="button"
-              onClick={() => setFilter(k)}
-              className={`rounded-md border px-2.5 py-1 font-mono-data text-[11px] capitalize transition ${
-                filter === k
-                  ? "border-sky-glow/60 bg-sky-glow/10 text-sky-glow glow-sky"
-                  : "border-border-strong/60 bg-surface-2 text-muted-foreground hover:text-foreground"
-              }`}
-            >
-              {k === "active" ? "Active only" : k}
-            </button>
-          ))}
-        </div>
-        <div className="flex items-center gap-1.5">
-          <label className="font-mono-data text-[10px] uppercase tracking-wider text-muted-foreground">
-            Jump to row #
-          </label>
+          {/* Quick queue filters */}
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="flex gap-1.5">
+              {(["all", "active", "processed"] as const).map((k) => (
+                <button
+                  key={k}
+                  type="button"
+                  onClick={() => setFilter(k)}
+                  className={`rounded-md border px-2.5 py-1 font-mono-data text-[11px] capitalize transition ${
+                    filter === k
+                      ? "border-sky-glow/60 bg-sky-glow/10 text-sky-glow glow-sky"
+                      : "border-border-strong/60 bg-surface-2 text-muted-foreground hover:text-foreground"
+                  }`}
+                >
+                  {k === "active" ? "Active only" : k}
+                </button>
+              ))}
+            </div>
+            <div className="flex items-center gap-1.5">
+              <label className="font-mono-data text-[10px] uppercase tracking-wider text-muted-foreground">
+                Jump to row #
+              </label>
           <Input
             type="number"
             min={0}
@@ -3155,10 +3636,11 @@ function SectionACard({
               </button>
             </>
           )}
+          </div>
         </div>
-      </div>
-
-      {/* Active queue email search */}
+        </div>
+      </CollapsibleSection>
+      {/* Active queue email search — stays outside Queue & Filters, always visible */}
       {filter !== "processed" && state.rows.length > 0 && (
         <div className="space-y-2">
           <Input
@@ -3988,5 +4470,3 @@ function SpamHealthCheck({
 }
 
 /* ===================== end of file ===================== */
-
-
