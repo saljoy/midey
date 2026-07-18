@@ -1626,10 +1626,10 @@ function CsvMergePanel() {
 
   const totalRowsHeld = files.reduce((sum, f) => sum + f.rows.length, 0) + (merged?.rows.length ?? 0);
 
-  const addFiles = async (fileList: FileList) => {
+  const addFiles = async (fileList: File[]) => {
     setLoading(true);
     let added = 0;
-    for (const file of Array.from(fileList)) {
+    for (const file of fileList) {
       try {
         const { headers, rows } = await parseFileToTable(file);
         const emailHeader = headers.find((h) => /e?mail/i.test(h)) ?? "";
@@ -1729,9 +1729,13 @@ function CsvMergePanel() {
         accept=".csv,.xlsx,.xls"
         className="hidden"
         onChange={(e) => {
-          const fl = e.target.files;
+          // Snapshot into a plain array FIRST — resetting e.target.value
+          // on the next line can empty the live FileList e.target.files
+          // still points to in some browsers, which silently drops every
+          // selected file before addFiles ever gets to read them.
+          const picked = e.target.files ? Array.from(e.target.files) : [];
           e.target.value = "";
-          if (fl && fl.length > 0) addFiles(fl);
+          if (picked.length > 0) addFiles(picked);
         }}
       />
       <button
