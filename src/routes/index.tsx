@@ -84,16 +84,19 @@ interface PersistedState {
   // manually toggleable. Persists across mode switches and page reloads
   // via the same localStorage-backed state as everything else.
   researchDone: Record<number, boolean>;
-  // Leads whose email ends with this domain (e.g. "gmail.com") jump to the
-  // front of the send queue, so they go out first. Empty = no reordering.
-  priorityDomain: string;
-  // Auto-detected column holding each lead's country, plus the currently
-  // selected country to prioritize (empty = no country filter).
-  countryHeader: string;
-  priorityCountry: string;
-  // When BOTH priorityDomain and priorityCountry are set: "all" requires a
-  // lead to match both to be prioritized, "any" lets either one qualify.
-  priorityMatchMode: "all" | "any";
+  // Generic filters — any column, any match type. Matching leads jump to
+  // the front of the send queue so they go out first; nobody is excluded.
+  filters: FilterRule[];
+  // When 2+ filters have a value set: "all" requires a lead to match every
+  // one, "any" lets a match on just one qualify.
+  filterMatchMode: "all" | "any";
+}
+
+interface FilterRule {
+  id: string;
+  header: string;
+  matchType: "contains" | "equals" | "startsWith" | "endsWith";
+  value: string;
 }
 
 /* ============================================================
@@ -243,10 +246,8 @@ const DEFAULT_STATE: PersistedState = {
   queueSearchPersisted: "",
   homepageMode: "research",
   researchDone: {},
-  priorityDomain: "",
-  countryHeader: "",
-  priorityCountry: "",
-  priorityMatchMode: "all",
+  filters: [],
+  filterMatchMode: "all",
 };
 
 function newId() {
@@ -655,6 +656,28 @@ function parseFileToTable(file: File): Promise<{ headers: string[]; rows: Row[] 
   });
 }
 
+// Tests one filter rule against one row. Cells are split on the same
+// colon/comma/semicolon delimiters used for multi-value fields (multiple
+// emails, etc.) — a rule matches if ANY piece satisfies it, which keeps
+// the old "ends with @gmail.com matches a multi-email cell" behavior
+// working while staying generic enough for any other column too.
+function matchesFilterRule(row: Row, rule: FilterRule): boolean {
+  const val = rule.value.trim().toLowerCase();
+  if (!rule.header || !val) return true; // incomplete rules never exclude/prioritize anything
+  const raw = String(row[rule.header] ?? "").toLowerCase();
+  const pieces = raw.split(/[,;:]+/).map((p) => p.trim()).filter(Boolean);
+  const cells = pieces.length > 0 ? pieces : [raw.trim()];
+  return cells.some((cell) => {
+    switch (rule.matchType) {
+      case "equals": return cell === val;
+      case "startsWith": return cell.startsWith(val);
+      case "endsWith": return cell.endsWith(val);
+      case "contains":
+      default: return cell.includes(val);
+    }
+  });
+}
+
 function cleanEmails(raw: string): string {
   // Some lead lists separate multiple addresses in one cell with ":" instead
   // of a comma. Gmail (and mailto:) only treats comma/semicolon as "send to
@@ -915,14 +938,10 @@ function Index() {
           setParsing(false); setParseProgress(100);
           const guessEmail = headers.find((h) => /e?mail/i.test(h)) ?? headers[0] ?? "";
           const guessDomain = headers.find((h) => /domain/i.test(h)) ?? "";
-          const guessCountry =
-            headers.find((h) => /^country[\s_-]?code$/i.test(h.trim())) ??
-            headers.find((h) => /country/i.test(h)) ??
-            "";
           const totalRows = rows.length;
           const keptRows = guessEmail ? rows.filter((r) => String(r[guessEmail] ?? "").trim() !== "") : rows;
           const skipped = totalRows - keptRows.length;
-          setState((s) => ({ ...s, headers, rows: keptRows, rowStates: {}, targetEmailHeader: s.targetEmailHeader || guessEmail, domainHeader: s.domainHeader || guessDomain, countryHeader: s.countryHeader || guessCountry }));
+          setState((s) => ({ ...s, headers, rows: keptRows, rowStates: {}, targetEmailHeader: s.targetEmailHeader || guessEmail, domainHeader: s.domainHeader || guessDomain }));
           toast.success(`Loaded ${keptRows.length.toLocaleString()} rows · ${headers.length} columns${skipped > 0 ? ` — skipped ${skipped.toLocaleString()} with no email` : ""}`);
         } catch (err) { setParsing(false); toast.error(`Parse failed: ${(err as Error).message}`); }
       };
@@ -951,14 +970,10 @@ function Index() {
         setParsing(false); setParseProgress(100);
         const guessEmail = headers.find((h) => /e?mail/i.test(h)) ?? headers[0] ?? "";
         const guessDomain = headers.find((h) => /domain/i.test(h)) ?? "";
-        const guessCountry =
-            headers.find((h) => /^country[\s_-]?code$/i.test(h.trim())) ??
-            headers.find((h) => /country/i.test(h)) ??
-            "";
         const totalRows = collected.length;
         const keptRows = guessEmail ? collected.filter((r) => String(r[guessEmail] ?? "").trim() !== "") : collected;
         const skipped = totalRows - keptRows.length;
-        setState((s) => ({ ...s, headers, rows: keptRows, rowStates: {}, targetEmailHeader: s.targetEmailHeader || guessEmail, domainHeader: s.domainHeader || guessDomain, countryHeader: s.countryHeader || guessCountry }));
+        setState((s) => ({ ...s, headers, rows: keptRows, rowStates: {}, targetEmailHeader: s.targetEmailHeader || guessEmail, domainHeader: s.domainHeader || guessDomain }));
         toast.success(`Loaded ${keptRows.length.toLocaleString()} rows · ${headers.length} columns${skipped > 0 ? ` — skipped ${skipped.toLocaleString()} with no email` : ""}`);
       },
       error: (err) => { setParsing(false); toast.error(`Parse failed: ${err.message}`); },
@@ -967,32 +982,20 @@ function Index() {
 
   // Queue
   const queue = useMemo(() => {
-    const domain = state.priorityDomain.trim().toLowerCase().replace(/^@/, "");
-    const country = state.priorityCountry.trim().toLowerCase();
+    const activeFilters = state.filters.filter((f) => f.header && f.value.trim());
     const priority: number[] = [], pending: number[] = [], processed: number[] = [];
     for (let i = 0; i < state.rows.length; i++) {
       if (state.rowStates[i] === "processed" || state.rowStates[i] === "skipped") { processed.push(i); continue; }
-      if (domain || country) {
-        let domainMatch = true, countryMatch = true;
-        if (domain) {
-          const email = String(state.rows[i]?.[state.targetEmailHeader] ?? "").toLowerCase();
-          // Multi-email cells (colon/comma/semicolon separated) count as a
-          // match if ANY address in the cell ends with the target domain.
-          domainMatch = email.split(/[,;:\s]+/).some((piece) => piece.endsWith(`@${domain}`));
-        }
-        if (country) {
-          const cell = String(state.rows[i]?.[state.countryHeader] ?? "").trim().toLowerCase();
-          countryMatch = cell === country;
-        }
-        const isMatch = state.priorityMatchMode === "any" && domain && country
-          ? domainMatch || countryMatch
-          : domainMatch && countryMatch;
+      if (activeFilters.length > 0) {
+        const row = state.rows[i];
+        const results = activeFilters.map((f) => matchesFilterRule(row, f));
+        const isMatch = state.filterMatchMode === "any" ? results.some(Boolean) : results.every(Boolean);
         if (isMatch) { priority.push(i); continue; }
       }
       pending.push(i);
     }
     return [...priority, ...pending, ...processed];
-  }, [state.rows, state.rowStates, state.priorityDomain, state.priorityCountry, state.priorityMatchMode, state.targetEmailHeader, state.countryHeader]);
+  }, [state.rows, state.rowStates, state.filters, state.filterMatchMode]);
 
   const processedCount = useMemo(
     () => Object.values(state.rowStates).filter((v) => v === "processed").length,
@@ -1147,8 +1150,6 @@ function Index() {
             onTargetEmailHeader={(v) => patch({ targetEmailHeader: v })}
             domainHeader={state.domainHeader}
             onDomainHeader={(v) => patch({ domainHeader: v })}
-            countryHeader={state.countryHeader}
-            onCountryHeader={(v) => patch({ countryHeader: v })}
           />
         </CollapsibleSection>
         <CollapsibleSection title="API Keys" icon={<Key className="size-3.5 text-sky-glow" />} defaultOpen={apiKeys.length === 0}>
@@ -1166,7 +1167,7 @@ function Index() {
       </SideDrawer>
 
       <main className="mx-auto max-w-5xl px-3 pb-24 pt-4 sm:px-6">
-        <DragContext.Provider value={{ dragUnlocked, dragPos, setDragPos, buttonsHidden, setButtonsHidden }}>
+        <DragContext.Provider value={{ dragUnlocked, setDragUnlocked, dragPos, setDragPos, buttonsHidden, setButtonsHidden }}>
           {resume && (
             <ResumeBanner
               lastRow={resume.lastRow}
@@ -2520,6 +2521,7 @@ function ResearchMode({
 
 type DragCtx = {
   dragUnlocked: boolean;
+  setDragUnlocked: (v: boolean) => void;
   dragPos: { x: number; y: number } | null;
   setDragPos: (p: { x: number; y: number } | null) => void;
   // Only ever applies while dragUnlocked (double-tap) mode is active —
@@ -2529,6 +2531,7 @@ type DragCtx = {
 };
 const DragContext = createContext<DragCtx>({
   dragUnlocked: false,
+  setDragUnlocked: () => {},
   dragPos: null,
   setDragPos: () => {},
   buttonsHidden: false,
@@ -2536,7 +2539,7 @@ const DragContext = createContext<DragCtx>({
 });
 
 function DraggableSendShell({ children }: { children: React.ReactNode }) {
-  const { dragUnlocked, dragPos, setDragPos, buttonsHidden, setButtonsHidden } = useContext(DragContext);
+  const { dragUnlocked, setDragUnlocked, dragPos, setDragPos, buttonsHidden, setButtonsHidden } = useContext(DragContext);
   const ref = useRef<HTMLDivElement>(null);
   const dragRef = useRef<{
     active: boolean;
@@ -2644,7 +2647,22 @@ function DraggableSendShell({ children }: { children: React.ReactNode }) {
       }
     >
       {dragUnlocked && (
-        <div className="mb-1 flex justify-end">
+        <div className="mb-1 flex justify-end gap-1.5">
+          <button
+            type="button"
+            onMouseDown={(e) => e.stopPropagation()}
+            onTouchStart={(e) => e.stopPropagation()}
+            onClick={() => {
+              setDragPos(null);
+              setButtonsHidden(false);
+              setDragUnlocked(false);
+              toast.success("Send button reset to default position");
+            }}
+            title="Move the Send/Skip buttons back to their default spot and lock them in place"
+            className="flex items-center gap-1 rounded-full border border-border-strong/60 bg-surface-2 px-2 py-0.5 font-mono-data text-[9px] text-muted-foreground hover:text-foreground"
+          >
+            <RotateCcw className="size-3" /> Reset
+          </button>
           <button
             type="button"
             // Toggling shouldn't also start a drag on the same tap.
@@ -2774,7 +2792,7 @@ function Header({
 
 function IngestPanel({
   parsing, progress, onFile, headers, totalRows, processedRows,
-  targetEmailHeader, onTargetEmailHeader, domainHeader, onDomainHeader, countryHeader, onCountryHeader,
+  targetEmailHeader, onTargetEmailHeader, domainHeader, onDomainHeader,
 }: {
   parsing: boolean;
   progress: number;
@@ -2786,8 +2804,6 @@ function IngestPanel({
   onTargetEmailHeader: (v: string) => void;
   domainHeader: string;
   onDomainHeader: (v: string) => void;
-  countryHeader: string;
-  onCountryHeader: (v: string) => void;
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
   return (
@@ -2859,22 +2875,6 @@ function IngestPanel({
               value={domainHeader}
               onChange={(e) => onDomainHeader(e.target.value)}
               className="h-9 w-full rounded-md border border-border-strong/70 bg-surface-2 px-2 font-mono-data text-sm outline-none focus:glow-sky"
-            >
-              <option value="">-- Not set --</option>
-              {headers.map((h) => (
-                <option key={h} value={h}>{h}</option>
-              ))}
-            </select>
-          </div>
-          <div className="mt-2 grid gap-2 sm:grid-cols-[200px_1fr] sm:items-center">
-            <Label className="text-xs uppercase tracking-wider text-muted-foreground">
-              Country column
-            </Label>
-            <select
-              value={countryHeader}
-              onChange={(e) => onCountryHeader(e.target.value)}
-              className="h-9 w-full rounded-md border border-border-strong/70 bg-surface-2 px-2 font-mono-data text-sm outline-none focus:glow-sky"
-              title="Used by the Prioritize country filter and the country badge in the send preview"
             >
               <option value="">-- Not set --</option>
               {headers.map((h) => (
@@ -3085,42 +3085,38 @@ function SectionACard({
         ? firstPendingFromStart
         : firstPendingIndex;
   const pendingCount = state.rows.length - processedCount;
-  const priorityMatchCount = useMemo(() => {
-    const domain = state.priorityDomain.trim().toLowerCase().replace(/^@/, "");
-    const country = state.priorityCountry.trim().toLowerCase();
-    if (!domain && !country) return 0;
+
+  const filterMatchCount = useMemo(() => {
+    const activeFilters = state.filters.filter((f) => f.header && f.value.trim());
+    if (activeFilters.length === 0) return 0;
     let count = 0;
     for (let i = 0; i < state.rows.length; i++) {
       if (state.rowStates[i] === "processed" || state.rowStates[i] === "skipped") continue;
-      let domainMatch = true, countryMatch = true;
-      if (domain) {
-        const email = String(state.rows[i]?.[state.targetEmailHeader] ?? "").toLowerCase();
-        domainMatch = email.split(/[,;:\s]+/).some((piece) => piece.endsWith(`@${domain}`));
-      }
-      if (country) {
-        const cell = String(state.rows[i]?.[state.countryHeader] ?? "").trim().toLowerCase();
-        countryMatch = cell === country;
-      }
-      const isMatch = state.priorityMatchMode === "any" && domain && country
-        ? domainMatch || countryMatch
-        : domainMatch && countryMatch;
+      const row = state.rows[i];
+      const results = activeFilters.map((f) => matchesFilterRule(row, f));
+      const isMatch = state.filterMatchMode === "any" ? results.some(Boolean) : results.every(Boolean);
       if (isMatch) count++;
     }
     return count;
-  }, [state.priorityDomain, state.priorityCountry, state.priorityMatchMode, state.rows, state.rowStates, state.targetEmailHeader, state.countryHeader]);
+  }, [state.filters, state.filterMatchMode, state.rows, state.rowStates]);
 
-  // Distinct country values actually present in the loaded CSV, for the
-  // dropdown — pulled from the data itself rather than a fixed list, since
-  // exact spelling/format (e.g. "US" vs "United States") varies by list.
-  const availableCountries = useMemo(() => {
-    if (!state.countryHeader) return [];
-    const set = new Set<string>();
-    for (const row of state.rows) {
-      const v = String(row[state.countryHeader] ?? "").trim();
-      if (v) set.add(v);
+  // Distinct values per column, for the small autocomplete suggestions on
+  // each filter rule's value box — pulled from the data itself so it
+  // matches your CSV's actual spelling/format rather than guessing.
+  const distinctValuesByHeader = useMemo(() => {
+    const map: Record<string, string[]> = {};
+    for (const h of state.headers) {
+      const set = new Set<string>();
+      for (const row of state.rows) {
+        const v = String(row[h] ?? "").trim();
+        if (v) set.add(v);
+        if (set.size >= 50) break;
+      }
+      map[h] = Array.from(set).sort((a, b) => a.localeCompare(b));
     }
-    return Array.from(set).sort((a, b) => a.localeCompare(b));
-  }, [state.rows, state.countryHeader]);
+    return map;
+  }, [state.rows, state.headers]);
+
   const [filter, setFilter] = useState<"all" | "active" | "processed">("all");
   const htmlTextareaRef = useRef<HTMLTextAreaElement>(null);
   const [processedSearch, setProcessedSearch] = useState("");
@@ -3576,71 +3572,128 @@ function SectionACard({
             </button>
           )}
         </div>
-        <div className="flex flex-wrap items-center gap-1.5">
-          <label className="font-mono-data text-[10px] uppercase tracking-wider text-muted-foreground">
-            Prioritize domain
-          </label>
-          <Input
-            value={state.priorityDomain}
-            onChange={(e) => patch({ priorityDomain: e.target.value })}
-            placeholder="e.g. gmail.com"
-            className="h-8 w-32 font-mono-data text-xs"
-            title="Pending leads whose email ends with this domain move to the front of the queue and get sent first"
-          />
+        <div className="space-y-2">
+          <div className="flex items-center justify-between">
+            <span className="font-mono-data text-[10px] uppercase tracking-wider text-muted-foreground">
+              Filters
+            </span>
+            <div className="flex items-center gap-2">
+              {state.filters.filter((f) => f.header && f.value.trim()).length >= 2 && (
+                <div className="flex items-center gap-1 rounded-md border border-border-strong/60 bg-surface-2 p-0.5">
+                  <button
+                    type="button"
+                    onClick={() => patch({ filterMatchMode: "all" })}
+                    title="A lead must match every filter to be prioritized"
+                    className={`rounded px-1.5 py-0.5 font-mono-data text-[10px] ${state.filterMatchMode === "all" ? "bg-sky-glow/20 text-sky-glow" : "text-muted-foreground"}`}
+                  >
+                    All
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => patch({ filterMatchMode: "any" })}
+                    title="A lead matching any one filter is prioritized"
+                    className={`rounded px-1.5 py-0.5 font-mono-data text-[10px] ${state.filterMatchMode === "any" ? "bg-sky-glow/20 text-sky-glow" : "text-muted-foreground"}`}
+                  >
+                    Any
+                  </button>
+                </div>
+              )}
+              {filterMatchCount > 0 && (
+                <span className="font-mono-data text-[10px] text-sky-glow">
+                  {filterMatchCount} match{filterMatchCount === 1 ? "" : "es"}
+                </span>
+              )}
+              {state.filters.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => patch({ filters: [] })}
+                  className="rounded-md border border-sky-glow/40 bg-sky-glow/10 px-2 py-1 font-mono-data text-[10px] text-sky-glow hover:text-foreground"
+                  title="Remove every filter · resume normal queue order"
+                >
+                  <RotateCcw className="inline size-3" /> clear all
+                </button>
+              )}
+            </div>
+          </div>
 
-          <label className="font-mono-data text-[10px] uppercase tracking-wider text-muted-foreground ml-1">
-            Country
-          </label>
-          <select
-            value={state.priorityCountry}
-            onChange={(e) => patch({ priorityCountry: e.target.value })}
-            disabled={availableCountries.length === 0}
-            className="h-8 rounded-md border border-border-strong/70 bg-surface-2 px-2 font-mono-data text-xs outline-none focus:glow-sky disabled:opacity-50"
-            title={availableCountries.length === 0 ? "No country column detected in this CSV" : "Pending leads from this country move to the front of the queue and get sent first"}
-          >
-            <option value="">-- Any --</option>
-            {availableCountries.map((c) => (
-              <option key={c} value={c}>{c}</option>
-            ))}
-          </select>
-
-          {state.priorityDomain.trim() && state.priorityCountry.trim() && (
-            <div className="flex items-center gap-1 rounded-md border border-border-strong/60 bg-surface-2 p-0.5 ml-1">
+          {state.filters.map((rule, idx) => (
+            <div key={rule.id} className="flex flex-wrap items-center gap-1.5 rounded-md border border-border-strong/40 bg-surface-2 p-1.5">
+              <select
+                value={rule.header}
+                onChange={(e) => {
+                  const next = [...state.filters];
+                  next[idx] = { ...rule, header: e.target.value };
+                  patch({ filters: next });
+                }}
+                className="h-8 rounded-md border border-border-strong/70 bg-bg-app px-2 font-mono-data text-xs outline-none focus:glow-sky"
+              >
+                <option value="">-- Column --</option>
+                {state.headers.map((h) => (
+                  <option key={h} value={h}>{h}</option>
+                ))}
+              </select>
+              <select
+                value={rule.matchType}
+                onChange={(e) => {
+                  const next = [...state.filters];
+                  next[idx] = { ...rule, matchType: e.target.value as FilterRule["matchType"] };
+                  patch({ filters: next });
+                }}
+                className="h-8 rounded-md border border-border-strong/70 bg-bg-app px-2 font-mono-data text-xs outline-none focus:glow-sky"
+              >
+                <option value="contains">Contains</option>
+                <option value="equals">Equals</option>
+                <option value="startsWith">Starts with</option>
+                <option value="endsWith">Ends with</option>
+              </select>
+              <Input
+                value={rule.value}
+                onChange={(e) => {
+                  const next = [...state.filters];
+                  next[idx] = { ...rule, value: e.target.value };
+                  patch({ filters: next });
+                }}
+                placeholder="value…"
+                list={`filter-values-${rule.id}`}
+                className="h-8 min-w-[120px] flex-1 font-mono-data text-xs"
+              />
+              {rule.header && (
+                <datalist id={`filter-values-${rule.id}`}>
+                  {(distinctValuesByHeader[rule.header] ?? []).map((v) => (
+                    <option key={v} value={v} />
+                  ))}
+                </datalist>
+              )}
               <button
                 type="button"
-                onClick={() => patch({ priorityMatchMode: "all" })}
-                title="Only prioritize leads matching BOTH the domain and the country"
-                className={`rounded px-1.5 py-0.5 font-mono-data text-[10px] ${state.priorityMatchMode === "all" ? "bg-sky-glow/20 text-sky-glow" : "text-muted-foreground"}`}
+                onClick={() => patch({ filters: state.filters.filter((f) => f.id !== rule.id) })}
+                className="shrink-0 rounded p-1.5 text-muted-foreground hover:text-destructive"
+                aria-label="Remove this filter"
               >
-                Both
-              </button>
-              <button
-                type="button"
-                onClick={() => patch({ priorityMatchMode: "any" })}
-                title="Prioritize leads matching EITHER the domain or the country"
-                className={`rounded px-1.5 py-0.5 font-mono-data text-[10px] ${state.priorityMatchMode === "any" ? "bg-sky-glow/20 text-sky-glow" : "text-muted-foreground"}`}
-              >
-                Either
+                <X className="size-3.5" />
               </button>
             </div>
-          )}
+          ))}
 
-          {(state.priorityDomain.trim() || state.priorityCountry.trim()) && (
-            <>
-              <span className="font-mono-data text-[10px] text-sky-glow">
-                {priorityMatchCount} match{priorityMatchCount === 1 ? "" : "es"}
-              </span>
-              <button
-                type="button"
-                onClick={() => patch({ priorityDomain: "", priorityCountry: "" })}
-                className="rounded-md border border-sky-glow/40 bg-sky-glow/10 px-2 py-1 font-mono-data text-[10px] text-sky-glow hover:text-foreground"
-                title="Clear priority · resume normal queue order"
-              >
-                <RotateCcw className="inline size-3" /> clear
-              </button>
-            </>
-          )}
-          </div>
+          <button
+            type="button"
+            onClick={() =>
+              patch({
+                filters: [
+                  ...state.filters,
+                  { id: `filter_${Math.random().toString(36).slice(2, 9)}`, header: state.headers[0] ?? "", matchType: "contains", value: "" },
+                ],
+              })
+            }
+            disabled={state.headers.length === 0}
+            className="flex w-full items-center justify-center gap-1.5 rounded-md border border-dashed border-border-strong/60 py-1.5 font-mono-data text-[11px] text-muted-foreground hover:text-foreground disabled:opacity-50"
+          >
+            <Plus className="size-3.5" /> Add filter
+          </button>
+          <p className="font-mono-data text-[10px] text-muted-foreground">
+            Matching leads move to the front of the queue and get sent first — nobody is excluded.
+          </p>
+        </div>
         </div>
         </div>
       </CollapsibleSection>
@@ -3660,7 +3713,37 @@ function SectionACard({
                   No matches for "{queueSearch}".
                 </p>
               ) : (
-                <ul className="max-h-56 space-y-1 overflow-auto">
+                <>
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      const idx = queueSearchMatches[0];
+                      const row = state.rows[idx];
+                      if (!row) return;
+                      // Numbered, one field per line — reads as clear
+                      // labeled groups when pasted into an AI chat, rather
+                      // than a single run-on line.
+                      let n = 1;
+                      const lines: string[] = [];
+                      for (const h of state.headers) {
+                        const v = String(row[h] ?? "").trim();
+                        if (!v) continue;
+                        lines.push(`${n}. ${h}: ${v}`);
+                        n++;
+                      }
+                      try {
+                        await navigator.clipboard.writeText(lines.join("\n"));
+                        toast.success(`Copied details for row #${idx}`);
+                      } catch {
+                        toast.error("Clipboard failed");
+                      }
+                    }}
+                    className="mb-1.5 flex w-full items-center justify-center gap-1.5 rounded-md border border-sky-glow/40 bg-sky-glow/10 py-1.5 font-mono-data text-[10px] text-sky-glow hover:bg-sky-glow/20"
+                    title="Copies every field from the top match, numbered and labeled — pastes cleanly into an AI chat"
+                  >
+                    <Copy className="size-3" /> Copy details for top match
+                  </button>
+                  <ul className="max-h-56 space-y-1 overflow-auto">
                   {queueSearchMatches.map((i) => {
                     const isProcessed = state.rowStates[i] === "processed";
                     return (
@@ -3697,7 +3780,8 @@ function SectionACard({
                       </li>
                     );
                   })}
-                </ul>
+                  </ul>
+                </>
               )}
             </div>
           )}
@@ -3769,7 +3853,6 @@ function SectionACard({
             rowIndex={nextPendingIndex}
             row={state.rows[nextPendingIndex]}
             targetEmailHeader={state.targetEmailHeader}
-            countryHeader={state.countryHeader}
             subjectTpl={rotation.subject}
             bodyTpl={rotation.body}
             htmlMode={state.htmlMode}
@@ -3799,12 +3882,11 @@ function SectionACard({
 }
 
 function NextRowPreview({
-  rowIndex, row, targetEmailHeader, countryHeader, subjectTpl, bodyTpl, htmlMode, htmlTpl, onSend, onSkip, isResend, ai, spinSeed,
+  rowIndex, row, targetEmailHeader, subjectTpl, bodyTpl, htmlMode, htmlTpl, onSend, onSkip, isResend, ai, spinSeed,
 }: {
   rowIndex: number;
   row: Row | undefined;
   targetEmailHeader: string;
-  countryHeader: string;
   subjectTpl: string;
   bodyTpl: string;
   htmlMode: boolean;
@@ -3872,11 +3954,6 @@ function NextRowPreview({
         <div className="font-mono-data text-[11px]">
           <span className="text-muted-foreground">To: </span>
           <span className="text-foreground">{toAddr || <span className="text-destructive">— missing —</span>}</span>
-          {countryHeader && row?.[countryHeader] && (
-            <span className="ml-2 rounded border border-border-strong/60 bg-bg-app px-1.5 py-0.5 text-[10px] text-muted-foreground">
-              {row[countryHeader]}
-            </span>
-          )}
         </div>
         <div className="font-mono-data text-[11px]">
           <span className="text-muted-foreground">Subject: </span>
