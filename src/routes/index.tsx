@@ -3051,6 +3051,33 @@ function SectionACard({
   const firstPendingIndex = queue.find(
     (i) => (state.rowStates[i] ?? "pending") === "pending",
   );
+
+  // Local draft for the homepage's Subject/Body/HTML boxes — same fix
+  // applied to the drawer's per-template editors earlier: typing here
+  // used to write straight into shared app state on every keystroke,
+  // which re-rendered the whole app (including the live preview) on every
+  // character and made typing feel laggy. Now typing only touches this
+  // local draft; nothing propagates out until Sync is tapped or you tap
+  // away from the field.
+  const [templateDraft, setTemplateDraft] = useState({
+    subject: activeTemplate.subject, body: activeTemplate.body, html: activeTemplate.html,
+  });
+  const [templateDirty, setTemplateDirty] = useState(false);
+  useEffect(() => {
+    if (!templateDirty) {
+      setTemplateDraft({ subject: activeTemplate.subject, body: activeTemplate.body, html: activeTemplate.html });
+    }
+  }, [activeTemplate.id, activeTemplate.subject, activeTemplate.body, activeTemplate.html, templateDirty]);
+
+  const syncTemplateDraft = () => {
+    updateTemplate(activeTemplate.id, templateDraft);
+    setTemplateDirty(false);
+  };
+  const setTemplateField = (patchDraft: Partial<typeof templateDraft>) => {
+    setTemplateDraft((d) => ({ ...d, ...patchDraft }));
+    setTemplateDirty(true);
+  };
+
   // Manual override — "Jump to row" input or "Resend" button on a processed row.
   // This is a ONE-OFF: it points at exactly one row, and gets cleared again
   // after that single send/skip, returning to normal queue order.
@@ -3272,8 +3299,9 @@ function SectionACard({
         <div className="grid gap-3 sm:grid-cols-2">
           <Field label="Subject template">
             <Input
-              value={activeTemplate.subject}
-              onChange={(e) => updateTemplate(activeTemplate.id, { subject: e.target.value })}
+              value={templateDraft.subject}
+              onChange={(e) => setTemplateField({ subject: e.target.value })}
+              onBlur={syncTemplateDraft}
               className="font-mono-data"
               placeholder="Hi {first_name}…"
             />
@@ -3287,6 +3315,18 @@ function SectionACard({
             />
           </Field>
         </div>
+        {templateDirty && (
+          <div className="mt-2 flex items-center justify-between gap-2 rounded-md border border-amber-glow/40 bg-amber-glow/5 px-2.5 py-1.5">
+            <span className="font-mono-data text-[10px] text-amber-glow">Unsynced changes — preview is stale</span>
+            <button
+              type="button"
+              onClick={syncTemplateDraft}
+              className="flex items-center gap-1 rounded-md border border-sky-glow/40 bg-sky-glow/10 px-2 py-1 font-mono-data text-[10px] text-sky-glow hover:bg-sky-glow/20"
+            >
+              <RefreshCw className="size-3" /> Sync
+            </button>
+          </div>
+        )}
       </CollapsibleSection>
       {state.htmlMode ? (
         <>
@@ -3298,19 +3338,32 @@ function SectionACard({
             <Field label="HTML code template">
               <HtmlToolbar
                 textareaRef={htmlTextareaRef}
-                value={activeTemplate.html}
-                onChange={(v) => updateTemplate(activeTemplate.id, { html: v })}
+                value={templateDraft.html}
+                onChange={(v) => setTemplateField({ html: v })}
               />
               <Textarea
                 ref={htmlTextareaRef}
-                value={activeTemplate.html}
-                onChange={(e) => updateTemplate(activeTemplate.id, { html: e.target.value })}
+                value={templateDraft.html}
+                onChange={(e) => setTemplateField({ html: e.target.value })}
+                onBlur={syncTemplateDraft}
                 rows={8}
                 className="font-mono-data text-[12px] leading-relaxed rounded-t-none border-t-0"
                 spellCheck={false}
                 placeholder="<div>Hi {first_name}…</div>"
               />
             </Field>
+            {templateDirty && (
+              <div className="mt-2 flex items-center justify-between gap-2 rounded-md border border-amber-glow/40 bg-amber-glow/5 px-2.5 py-1.5">
+                <span className="font-mono-data text-[10px] text-amber-glow">Unsynced changes — preview is stale</span>
+                <button
+                  type="button"
+                  onClick={syncTemplateDraft}
+                  className="flex items-center gap-1 rounded-md border border-sky-glow/40 bg-sky-glow/10 px-2 py-1 font-mono-data text-[10px] text-sky-glow hover:bg-sky-glow/20"
+                >
+                  <RefreshCw className="size-3" /> Sync
+                </button>
+              </div>
+            )}
           </CollapsibleSection>
 
           {/* Live Preview stays outside the collapsible section above and
@@ -3407,13 +3460,26 @@ function SectionACard({
             <div className="space-y-3">
               <Field label="Plain-text body template">
                 <Textarea
-                  value={activeTemplate.body}
-                  onChange={(e) => updateTemplate(activeTemplate.id, { body: e.target.value })}
+                  value={templateDraft.body}
+                  onChange={(e) => setTemplateField({ body: e.target.value })}
+                  onBlur={syncTemplateDraft}
                   rows={6}
                   className="font-mono-data text-[13px]"
                   placeholder="Hi {first_name}, …"
                 />
               </Field>
+              {templateDirty && (
+                <div className="flex items-center justify-between gap-2 rounded-md border border-amber-glow/40 bg-amber-glow/5 px-2.5 py-1.5">
+                  <span className="font-mono-data text-[10px] text-amber-glow">Unsynced changes — preview is stale</span>
+                  <button
+                    type="button"
+                    onClick={syncTemplateDraft}
+                    className="flex items-center gap-1 rounded-md border border-sky-glow/40 bg-sky-glow/10 px-2 py-1 font-mono-data text-[10px] text-sky-glow hover:bg-sky-glow/20"
+                  >
+                    <RefreshCw className="size-3" /> Sync
+                  </button>
+                </div>
+              )}
 
               {/* Test sandbox · plain text */}
               <div className="space-y-2 rounded-lg border border-amber-glow/40 bg-amber-glow/5 p-3">
