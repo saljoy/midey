@@ -219,6 +219,30 @@ const DEFAULT_PLAIN_PROMPT = `Take the email text below and return it as clean p
 Email text:
 [EMAIL_TEXT]`;
 
+const DEFAULT_SPAM_CHECK_PROMPT = `Review the cold outreach email below the way an experienced deliverability reviewer would — looking for things a simple keyword scanner would miss, not just obvious spam trigger words.
+
+Look specifically for:
+- Overly salesy or pressure-heavy phrasing (manufactured urgency, "act now" energy, hard-sell language)
+- Spintax or templated phrasing that reads awkwardly or unnaturally once resolved into one version
+- Generic mass-email tells — anything that reads like it could have been sent to anyone, rather than written for this specific recipient
+- Subject lines that feel vague, clickbait-y, or spammy rather than genuinely curiosity-driven
+- Anything that reads more like a mailing list blast than a real 1:1 message
+
+Do not comment on factual accuracy or whether claims in the email are true — only on tone, phrasing, and how a spam filter or a wary recipient would likely react to the writing itself.
+
+Respond in this exact plain text format, nothing else, no markdown formatting, no asterisks:
+
+Risk: [Low / Medium / High]
+
+Issues found:
+- [one line per issue, or "None found" if there aren't any]
+
+Suggestions:
+- [one line per suggestion, or "None needed" if the email reads clean]
+
+Email to review:
+[EMAIL_TEXT]`;
+
 /* ============================================================
    DEFAULT STATE
    ============================================================ */
@@ -300,6 +324,7 @@ function loadPrompts() {
     email: DEFAULT_EMAIL_PROMPT,
     html: DEFAULT_HTML_PROMPT,
     plainFormat: DEFAULT_PLAIN_PROMPT,
+    spamCheck: DEFAULT_SPAM_CHECK_PROMPT,
   };
   if (typeof window === "undefined") return defaults;
   try {
@@ -321,6 +346,7 @@ function loadPrompts() {
       email: looksLikeOldApproachPrompt ? defaults.email : (p.email || defaults.email),
       html: p.html || defaults.html,
       plainFormat: p.plainFormat || defaults.plainFormat,
+      spamCheck: p.spamCheck || defaults.spamCheck,
     };
   } catch {
     return defaults;
@@ -346,6 +372,7 @@ const BACKUP_KEYS = {
   apiKeys: API_KEYS_KEY,
   prompts: PROMPTS_KEY,
   leadCache: "midey.research.leadCache.v1",
+  sendStats: "midey.sendStats.v1",
 } as const;
 
 function buildFullBackup(): string {
@@ -713,6 +740,99 @@ function googleSearchUrl(query: string): string {
   return `https://www.google.com/search?q=${encodeURIComponent(query)}`;
 }
 
+/* ============================================================
+   SEND STATS (Analytics Dashboard)
+   ============================================================
+   Deliberately kept in its OWN localStorage key, entirely separate from
+   the main app state (STORAGE_KEY). This means the header's "Clear all
+   data" action, or any future reset of the CSV/templates, can never touch
+   these numbers by accident — the ONLY way to zero them out is the
+   password-gated Reset button inside the Analytics panel itself.
+
+   Every genuine send anywhere in the app (Queue mode's real send, both
+   Research Mode send buttons) calls recordSend() through this one shared
+   function — Test Sandbox's "Send test draft" deliberately never calls it,
+   since that's an explicit non-progressing test action.
+   ============================================================ */
+
+const SEND_STATS_KEY = "midey.sendStats.v1";
+
+interface MonthlyStat { month: string; count: number } // month = "YYYY-MM"
+
+interface SendStats {
+  dailyCount: number;
+  dailyDate: string;   // "YYYY-MM-DD"
+  monthlyCount: number;
+  monthlyMonth: string; // "YYYY-MM"
+  monthlyHistory: MonthlyStat[]; // archived, completed months only
+}
+
+function todayStr(): string { return new Date().toISOString().slice(0, 10); }
+function thisMonthStr(): string { return new Date().toISOString().slice(0, 7); }
+
+function defaultSendStats(): SendStats {
+  return { dailyCount: 0, dailyDate: todayStr(), monthlyCount: 0, monthlyMonth: thisMonthStr(), monthlyHistory: [] };
+}
+
+// Applies day/month rollover to whatever stats were loaded, WITHOUT
+// incrementing anything — used both on load (so the display is correct
+// even before the next send) and right before recording a new send.
+function rolloverSendStats(stats: SendStats): SendStats {
+  let next = { ...stats };
+  const today = todayStr();
+  const month = thisMonthStr();
+  if (next.dailyDate !== today) {
+    next = { ...next, dailyCount: 0, dailyDate: today };
+  }
+  if (next.monthlyMonth !== month) {
+    const history = next.monthlyMonth && next.monthlyCount > 0
+      ? [...next.monthlyHistory, { month: next.monthlyMonth, count: next.monthlyCount }]
+      : next.monthlyHistory;
+    next = { ...next, monthlyCount: 0, monthlyMonth: month, monthlyHistory: history };
+  }
+  return next;
+}
+
+function loadSendStats(): SendStats {
+  if (typeof window === "undefined") return defaultSendStats();
+  try {
+    const raw = localStorage.getItem(SEND_STATS_KEY);
+    if (!raw) return defaultSendStats();
+    const parsed = JSON.parse(raw) as Partial<SendStats>;
+    const merged: SendStats = {
+      dailyCount: parsed.dailyCount ?? 0,
+      dailyDate: parsed.dailyDate || todayStr(),
+      monthlyCount: parsed.monthlyCount ?? 0,
+      monthlyMonth: parsed.monthlyMonth || thisMonthStr(),
+      monthlyHistory: Array.isArray(parsed.monthlyHistory) ? parsed.monthlyHistory : [],
+    };
+    return rolloverSendStats(merged);
+  } catch {
+    return defaultSendStats();
+  }
+}
+
+function saveSendStats(stats: SendStats) {
+  try { localStorage.setItem(SEND_STATS_KEY, JSON.stringify(stats)); } catch {}
+}
+
+// The single choke point every real send in the app calls through.
+function recordSend() {
+  const rolled = rolloverSendStats(loadSendStats());
+  const next: SendStats = { ...rolled, dailyCount: rolled.dailyCount + 1, monthlyCount: rolled.monthlyCount + 1 };
+  saveSendStats(next);
+}
+
+function lifetimeSendTotal(stats: SendStats): number {
+  return stats.monthlyHistory.reduce((sum, m) => sum + m.count, 0) + stats.monthlyCount;
+}
+
+function monthLabel(ym: string): string {
+  const [y, m] = ym.split("-").map(Number);
+  if (!y || !m) return ym;
+  return new Date(y, m - 1, 1).toLocaleDateString(undefined, { month: "long", year: "numeric" });
+}
+
 // Pulls a recipient address out of the research brief's "Contact info"
 // section. Prefers a direct (non generic-inbox) address over a fallback
 // like info@ / support@ / hello@, matching how the research prompt itself
@@ -771,6 +891,7 @@ function Index() {
     email: DEFAULT_EMAIL_PROMPT,
     html: DEFAULT_HTML_PROMPT,
     plainFormat: DEFAULT_PLAIN_PROMPT,
+    spamCheck: DEFAULT_SPAM_CHECK_PROMPT,
   });
 
   // Draggable send button
@@ -1009,6 +1130,7 @@ function Index() {
     if (!toAddr) { toast.error(`Row ${rowIndex} missing "${state.targetEmailHeader}"`); return; }
     setState((s) => ({ ...s, rowStates: { ...s.rowStates, [rowIndex]: "processed" }, sendCounter: s.sendCounter + 1 }));
     sendLogRef.current.push(Date.now());
+    recordSend();
   }, [state.rows, state.targetEmailHeader]);
 
   const skipRow = useCallback((rowIndex: number) => {
@@ -1118,7 +1240,7 @@ function Index() {
 
       {/* Side drawer */}
       <SideDrawer open={drawerOpen} onClose={() => setDrawerOpen(false)}>
-        <CollapsibleSection title="Session Stats" icon={<Activity className="size-3.5 text-sky-glow" />} defaultOpen>
+        <CollapsibleSection title="Session Stats" icon={<Activity className="size-3.5 text-sky-glow" />} defaultOpen={false}>
           <SessionStats
             processedCount={processedCount}
             totalRows={state.rows.length}
@@ -1138,7 +1260,7 @@ function Index() {
             onDelete={deleteTemplate}
           />
         </CollapsibleSection>
-        <CollapsibleSection title="Lead List / CSV" icon={<Upload className="size-3.5 text-sky-glow" />} defaultOpen={state.rows.length === 0} badge={<span className="font-mono-data text-[10px] text-muted-foreground">{state.rows.length.toLocaleString()} rows</span>}>
+        <CollapsibleSection title="Lead List / CSV" icon={<Upload className="size-3.5 text-sky-glow" />} defaultOpen={false} badge={<span className="font-mono-data text-[10px] text-muted-foreground">{state.rows.length.toLocaleString()} rows</span>}>
           <IngestPanel
             parsing={parsing}
             progress={parseProgress}
@@ -1152,7 +1274,7 @@ function Index() {
             onDomainHeader={(v) => patch({ domainHeader: v })}
           />
         </CollapsibleSection>
-        <CollapsibleSection title="API Keys" icon={<Key className="size-3.5 text-sky-glow" />} defaultOpen={apiKeys.length === 0}>
+        <CollapsibleSection title="API Keys" icon={<Key className="size-3.5 text-sky-glow" />} defaultOpen={false}>
           <GeminiKeyManager keys={apiKeys} onChange={setApiKeys} />
         </CollapsibleSection>
         <CollapsibleSection title="Prompt Settings" icon={<Settings className="size-3.5 text-amber-glow" />} defaultOpen={false}>
@@ -1160,6 +1282,9 @@ function Index() {
         </CollapsibleSection>
         <CollapsibleSection title="Backup & Migrate" icon={<Download className="size-3.5 text-sky-glow" />} defaultOpen={false}>
           <BackupPanel />
+        </CollapsibleSection>
+        <CollapsibleSection title="Analytics Dashboard" icon={<Activity className="size-3.5 text-sky-glow" />} defaultOpen={false}>
+          <AnalyticsDashboardPanel />
         </CollapsibleSection>
         <CollapsibleSection title="Merge CSV Files" icon={<Layers className="size-3.5 text-amber-glow" />} defaultOpen={false}>
           <CsvMergePanel />
@@ -1220,6 +1345,8 @@ function Index() {
               resumeTarget={resumeTarget}
               onConsumeResume={() => setResumeTarget(null)}
               ai={{ enabled: false, provider: "gemini", apiKey: "", prompt: "", fallback: "", descriptionColumn: "" }}
+              geminiCall={geminiCall}
+              spamCheckPrompt={prompts.spamCheck}
             />
           </div>
         </DragContext.Provider>
@@ -1599,6 +1726,126 @@ function BackupPanel() {
 }
 
 /* ============================================================
+   ANALYTICS DASHBOARD
+   ============================================================
+   Reads from its own dedicated localStorage key (see recordSend() and
+   friends near the top of the file) — never touched by "Clear all data"
+   or anything else in the app. The only way to zero these numbers is the
+   password-gated Reset button below.
+   ============================================================ */
+
+const STATS_RESET_PASSWORD = "252502";
+
+function AnalyticsDashboardPanel() {
+  const [stats, setStats] = useState<SendStats>(() => loadSendStats());
+  const [resetting, setResetting] = useState(false);
+  const [passwordInput, setPasswordInput] = useState("");
+  const [passwordError, setPasswordError] = useState(false);
+
+  const lifetime = lifetimeSendTotal(stats);
+  const sortedHistory = [...stats.monthlyHistory].sort((a, b) => b.month.localeCompare(a.month));
+
+  const confirmReset = () => {
+    if (passwordInput !== STATS_RESET_PASSWORD) {
+      setPasswordError(true);
+      return;
+    }
+    const fresh = defaultSendStats();
+    saveSendStats(fresh);
+    setStats(fresh);
+    setResetting(false);
+    setPasswordInput("");
+    setPasswordError(false);
+    toast.success("Analytics reset");
+  };
+
+  return (
+    <div className="space-y-3">
+      <div className="grid grid-cols-3 gap-2">
+        <div className="rounded-lg border border-border-strong/60 bg-surface-2 p-3 text-center">
+          <p className="font-mono-data text-[9px] uppercase tracking-wider text-muted-foreground">Today</p>
+          <p className="mt-1 font-mono-data text-xl font-semibold text-sky-glow">{stats.dailyCount.toLocaleString()}</p>
+        </div>
+        <div className="rounded-lg border border-border-strong/60 bg-surface-2 p-3 text-center">
+          <p className="font-mono-data text-[9px] uppercase tracking-wider text-muted-foreground">This Month</p>
+          <p className="mt-1 font-mono-data text-xl font-semibold text-sky-glow">{stats.monthlyCount.toLocaleString()}</p>
+        </div>
+        <div className="rounded-lg border border-amber-glow/40 bg-amber-glow/5 p-3 text-center">
+          <p className="font-mono-data text-[9px] uppercase tracking-wider text-muted-foreground">Lifetime</p>
+          <p className="mt-1 font-mono-data text-xl font-semibold text-amber-glow">{lifetime.toLocaleString()}</p>
+        </div>
+      </div>
+
+      <p className="font-mono-data text-[10px] leading-relaxed text-muted-foreground">
+        Counts every real send across the whole app — Queue mode and both Research Mode send buttons. Test Sandbox's
+        "Send test draft" never counts, since it's explicitly a non-sending preview. Today resets at midnight, This
+        Month resets and archives on the 1st — nothing here is touched by Clear All Data.
+      </p>
+
+      {sortedHistory.length > 0 && (
+        <div className="space-y-1">
+          <p className="font-mono-data text-[10px] uppercase tracking-wider text-muted-foreground">Monthly history</p>
+          <div className="max-h-40 space-y-1 overflow-auto rounded-lg border border-border-strong/60 bg-surface-2 p-2">
+            {sortedHistory.map((m) => (
+              <div key={m.month} className="flex items-center justify-between font-mono-data text-[11px]">
+                <span className="text-muted-foreground">{monthLabel(m.month)}</span>
+                <span className="text-foreground">{m.count.toLocaleString()}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {!resetting ? (
+        <button
+          type="button"
+          onClick={() => { setResetting(true); setPasswordInput(""); setPasswordError(false); }}
+          className="flex w-full items-center justify-center gap-1.5 rounded-md border border-destructive/40 py-2 font-mono-data text-[10px] text-destructive hover:bg-destructive/10"
+        >
+          <Trash2 className="size-3" /> Reset all-time stats
+        </button>
+      ) : (
+        <div className="space-y-2 rounded-lg border border-destructive/50 bg-destructive/5 p-3">
+          <p className="font-mono-data text-[11px] text-destructive">
+            This wipes Today, This Month, and the entire monthly history — permanently. Enter the password to confirm.
+          </p>
+          <Input
+            type="password"
+            value={passwordInput}
+            onChange={(e) => { setPasswordInput(e.target.value); setPasswordError(false); }}
+            onKeyDown={(e) => { if (e.key === "Enter") confirmReset(); }}
+            placeholder="Password"
+            className="h-9 font-mono-data text-sm"
+            autoFocus
+          />
+          {passwordError && (
+            <p className="font-mono-data text-[10px] text-destructive">Incorrect password — nothing was reset.</p>
+          )}
+          <div className="flex gap-2">
+            <Button
+              size="sm"
+              variant="destructive"
+              onClick={confirmReset}
+              className="flex-1"
+            >
+              Confirm reset
+            </Button>
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={() => { setResetting(false); setPasswordInput(""); setPasswordError(false); }}
+              className="flex-1"
+            >
+              Cancel
+            </Button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ============================================================
    CSV MERGE TOOL
    ============================================================
    Lets you add several CSV/XLSX files, merges them into one table (union
@@ -1808,11 +2055,12 @@ function CsvMergePanel() {
    PROMPT SETTINGS PANEL
    ============================================================ */
 
-const PROMPT_LABELS: Record<"research" | "email" | "html" | "plainFormat", string> = {
+const PROMPT_LABELS: Record<"research" | "email" | "html" | "plainFormat" | "spamCheck", string> = {
   research: "Research Prompt",
   email: "Email Writing Prompt",
   html: "HTML Output Prompt",
   plainFormat: "Plain Text Output Prompt (used when Plain Text mode is selected)",
+  spamCheck: "Spam/Deliverability Check Prompt (used by \"Check with AI\")",
 };
 
 const PROMPT_DEFAULTS = {
@@ -1820,9 +2068,10 @@ const PROMPT_DEFAULTS = {
   email: DEFAULT_EMAIL_PROMPT,
   html: DEFAULT_HTML_PROMPT,
   plainFormat: DEFAULT_PLAIN_PROMPT,
+  spamCheck: DEFAULT_SPAM_CHECK_PROMPT,
 };
 
-type PromptSet = { research: string; email: string; html: string; plainFormat: string };
+type PromptSet = { research: string; email: string; html: string; plainFormat: string; spamCheck: string };
 
 function PromptSettingsPanel({
   prompts, onChange,
@@ -1853,7 +2102,7 @@ function PromptSettingsPanel({
         Edit the prompts that drive the Research + Email Writer. Changes take effect on the next AI call. Use Reset to restore the original.
       </p>
 
-      {(["research", "email", "plainFormat", "html"] as const).map((key) => (
+      {(["research", "email", "plainFormat", "html", "spamCheck"] as const).map((key) => (
         <div key={key} className="space-y-1.5">
           <div className="flex items-center justify-between gap-2">
             <Label className="font-mono-data text-[10px] uppercase tracking-wider text-muted-foreground">
@@ -1870,7 +2119,7 @@ function PromptSettingsPanel({
           <Textarea
             value={local[key]}
             onChange={(e) => setLocal((p) => ({ ...p, [key]: e.target.value }))}
-            rows={key === "html" || key === "plainFormat" ? 6 : 10}
+            rows={key === "html" || key === "plainFormat" || key === "spamCheck" ? 6 : 10}
             className="font-mono-data text-[11px] leading-relaxed"
             spellCheck={false}
           />
@@ -2130,6 +2379,7 @@ function ResearchMode({
   const sendEmail = async (subject: string, html: string) => {
     await copyHtml(html);
     const href = buildMailto(contactEmail, { subject });
+    recordSend();
     setTimeout(() => { window.location.href = href; }, 300);
   };
 
@@ -2137,6 +2387,7 @@ function ResearchMode({
   // no clipboard round trip needed, the compose window opens fully filled in.
   const sendPlainEmail = (subject: string, body: string) => {
     const href = buildMailto(contactEmail, { subject, body });
+    recordSend();
     window.location.href = href;
   };
 
@@ -3027,6 +3278,7 @@ function SectionACard({
   executeTestHtml, renderedTestHtml, renderedTestSubject, sampleRow,
   executeTestPlain, renderedTestSubjectPlain,
   activeTemplate, updateTemplate, rotation, resumeTarget, onConsumeResume, ai,
+  geminiCall, spamCheckPrompt,
 }: {
   state: PersistedState;
   patch: (p: Partial<PersistedState>) => void;
@@ -3047,6 +3299,8 @@ function SectionACard({
   resumeTarget: number | null;
   onConsumeResume: () => void;
   ai: AISettings;
+  geminiCall: (prompt: string, useWebSearch?: boolean) => Promise<string>;
+  spamCheckPrompt: string;
 }) {
   const firstPendingIndex = queue.find(
     (i) => (state.rowStates[i] ?? "pending") === "pending",
@@ -3077,6 +3331,31 @@ function SectionACard({
     setTemplateDraft((d) => ({ ...d, ...patchDraft }));
     setTemplateDirty(true);
   };
+
+  // Same fix for the Test Sandbox's recipient/sample-row fields — typing
+  // stays local and instant. Since "Send test draft" reads the committed
+  // app state directly (not this draft), it's disabled while there's an
+  // unsynced edit, so it can never fire on stale test data.
+  const [testDraft, setTestDraft] = useState({ recipientB: state.recipientB, sampleIdB: state.sampleIdB });
+  const [testDirty, setTestDirty] = useState(false);
+  useEffect(() => {
+    if (!testDirty) setTestDraft({ recipientB: state.recipientB, sampleIdB: state.sampleIdB });
+  }, [state.recipientB, state.sampleIdB, testDirty]);
+  const syncTestDraft = () => {
+    patch({ recipientB: testDraft.recipientB, sampleIdB: testDraft.sampleIdB });
+    setTestDirty(false);
+  };
+  const setTestField = (p: Partial<typeof testDraft>) => {
+    setTestDraft((d) => ({ ...d, ...p }));
+    setTestDirty(true);
+  };
+
+  // Rendered (token-substituted) plain-text body, for the AI spam check to
+  // read in plain-text mode — renderedTestHtml already covers HTML mode.
+  const renderedPlainBodyPreview = useMemo(
+    () => renderTemplate(activeTemplate.body, sampleRow, undefined, state.sendCounter),
+    [activeTemplate.body, sampleRow, state.sendCounter]
+  );
 
   // Manual override — "Jump to row" input or "Resend" button on a processed row.
   // This is a ONE-OFF: it points at exactly one row, and gets cleared again
@@ -3288,6 +3567,10 @@ function SectionACard({
           subject={activeTemplate.subject}
           body={state.htmlMode ? activeTemplate.html : activeTemplate.body}
           html={state.htmlMode ? activeTemplate.html : ""}
+          renderedSubject={state.htmlMode ? renderedTestSubject : renderedTestSubjectPlain}
+          renderedBody={state.htmlMode ? renderedTestHtml : renderedPlainBodyPreview}
+          geminiCall={geminiCall}
+          spamCheckPrompt={spamCheckPrompt}
         />
       </CollapsibleSection>
 
@@ -3422,8 +3705,9 @@ function SectionACard({
               <div className="grid gap-2 sm:grid-cols-2">
                 <Input
                   type="email"
-                  value={state.recipientB}
-                  onChange={(e) => patch({ recipientB: e.target.value })}
+                  value={testDraft.recipientB}
+                  onChange={(e) => setTestField({ recipientB: e.target.value })}
+                  onBlur={syncTestDraft}
                   placeholder="manual test email"
                   className="h-9 font-mono-data text-xs"
                 />
@@ -3431,19 +3715,33 @@ function SectionACard({
                   type="number"
                   min={0}
                   max={Math.max(0, state.rows.length - 1)}
-                  value={state.sampleIdB}
-                  onChange={(e) => patch({ sampleIdB: Math.max(0, Number(e.target.value) || 0) })}
+                  value={testDraft.sampleIdB}
+                  onChange={(e) => setTestField({ sampleIdB: Math.max(0, Number(e.target.value) || 0) })}
+                  onBlur={syncTestDraft}
                   placeholder="sample row id"
                   className="h-9 font-mono-data text-xs"
                 />
               </div>
-              <Button
-                size="sm"
-                onClick={executeTestHtml}
-                className="glow-amber w-full bg-[var(--amber)] text-black hover:bg-[var(--amber)]/90"
-              >
-                <Copy className="size-3.5" /> Send test draft
-              </Button>
+              {testDirty ? (
+                <div className="flex items-center justify-between gap-2 rounded-md border border-amber-glow/40 bg-amber-glow/5 px-2.5 py-1.5">
+                  <span className="font-mono-data text-[10px] text-amber-glow">Sync before sending a test</span>
+                  <button
+                    type="button"
+                    onClick={syncTestDraft}
+                    className="flex items-center gap-1 rounded-md border border-sky-glow/40 bg-sky-glow/10 px-2 py-1 font-mono-data text-[10px] text-sky-glow hover:bg-sky-glow/20"
+                  >
+                    <RefreshCw className="size-3" /> Sync
+                  </button>
+                </div>
+              ) : (
+                <Button
+                  size="sm"
+                  onClick={executeTestHtml}
+                  className="glow-amber w-full bg-[var(--amber)] text-black hover:bg-[var(--amber)]/90"
+                >
+                  <Copy className="size-3.5" /> Send test draft
+                </Button>
+              )}
               <p className="font-mono-data text-[10px] text-muted-foreground">
                 Subject preview: <span className="text-amber-glow">{renderedTestSubject || "—"}</span>
               </p>
@@ -3489,8 +3787,9 @@ function SectionACard({
                 <div className="grid gap-2 sm:grid-cols-2">
                   <Input
                     type="email"
-                    value={state.recipientB}
-                    onChange={(e) => patch({ recipientB: e.target.value })}
+                    value={testDraft.recipientB}
+                    onChange={(e) => setTestField({ recipientB: e.target.value })}
+                    onBlur={syncTestDraft}
                     placeholder="manual test email"
                     className="h-9 font-mono-data text-xs"
                   />
@@ -3498,19 +3797,33 @@ function SectionACard({
                     type="number"
                     min={0}
                     max={Math.max(0, state.rows.length - 1)}
-                    value={state.sampleIdB}
-                    onChange={(e) => patch({ sampleIdB: Math.max(0, Number(e.target.value) || 0) })}
+                    value={testDraft.sampleIdB}
+                    onChange={(e) => setTestField({ sampleIdB: Math.max(0, Number(e.target.value) || 0) })}
+                    onBlur={syncTestDraft}
                     placeholder="sample row id"
                     className="h-9 font-mono-data text-xs"
                   />
                 </div>
-                <Button
-                  size="sm"
-                  onClick={executeTestPlain}
-                  className="glow-amber w-full bg-[var(--amber)] text-black hover:bg-[var(--amber)]/90"
-                >
-                  <Copy className="size-3.5" /> Send test draft
-                </Button>
+                {testDirty ? (
+                  <div className="flex items-center justify-between gap-2 rounded-md border border-amber-glow/40 bg-amber-glow/5 px-2.5 py-1.5">
+                    <span className="font-mono-data text-[10px] text-amber-glow">Sync before sending a test</span>
+                    <button
+                      type="button"
+                      onClick={syncTestDraft}
+                      className="flex items-center gap-1 rounded-md border border-sky-glow/40 bg-sky-glow/10 px-2 py-1 font-mono-data text-[10px] text-sky-glow hover:bg-sky-glow/20"
+                    >
+                      <RefreshCw className="size-3" /> Sync
+                    </button>
+                  </div>
+                ) : (
+                  <Button
+                    size="sm"
+                    onClick={executeTestPlain}
+                    className="glow-amber w-full bg-[var(--amber)] text-black hover:bg-[var(--amber)]/90"
+                  >
+                    <Copy className="size-3.5" /> Send test draft
+                  </Button>
+                )}
                 <p className="font-mono-data text-[10px] text-muted-foreground">
                   Subject preview: <span className="text-amber-glow">{renderedTestSubjectPlain || "—"}</span>
                 </p>
@@ -4003,6 +4316,20 @@ function NextRowPreview({
     onSend();
     setTimeout(() => { window.location.href = hrefSnapshot; }, 300);
   };
+
+  // Plain-text copy of what's currently shown — deliberately its own
+  // static button, not inside DraggableSendShell, so it's always in place
+  // even if Send/Skip get hidden or dragged elsewhere.
+  const copyPreviewDetails = async () => {
+    const plainBody = htmlMode ? renderedHtml.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim() : body;
+    const text = `Subject: ${subject || "—"}\n\n${plainBody || "—"}`;
+    try {
+      await navigator.clipboard.writeText(text);
+      toast.success("Subject & body copied");
+    } catch (e) {
+      toast.error(`Clipboard failed: ${(e as Error).message}`);
+    }
+  };
   return (
     <div className="space-y-3">
       <div className="flex items-center justify-between">
@@ -4039,6 +4366,16 @@ function NextRowPreview({
 {body || "—"}
         </pre>
         )}
+      </div>
+      <div className="flex justify-start">
+        <button
+          type="button"
+          onClick={copyPreviewDetails}
+          className="flex items-center gap-1.5 rounded-md border border-border-strong/60 bg-surface-2 px-2.5 py-1.5 font-mono-data text-[10px] text-muted-foreground hover:text-foreground"
+          title="Copy the subject and body of this preview as plain text"
+        >
+          <Copy className="size-3.5" /> Copy subject & body
+        </button>
       </div>
       <DraggableSendShell>
         <div className="flex justify-end gap-2">
@@ -4537,13 +4874,53 @@ function TemplateEditorCard({
 /* ===================== Spam / Link Health Check ===================== */
 
 function SpamHealthCheck({
-  subject, body, html,
-}: { subject: string; body: string; html: string }) {
+  subject, body, html, renderedSubject, renderedBody, geminiCall, spamCheckPrompt,
+}: {
+  subject: string;
+  body: string;
+  html: string;
+  renderedSubject: string;
+  renderedBody: string;
+  geminiCall: (prompt: string, useWebSearch?: boolean) => Promise<string>;
+  spamCheckPrompt: string;
+}) {
   const subj = useMemo(() => scanSpam(subject), [subject]);
   const bod = useMemo(() => scanSpam(body), [body]);
   const links = useMemo(() => (html ? scanLinks(html) : { ok: 0, broken: [] as { tag: string; reason: string }[] }), [html]);
   const totalHits = subj.hits.length + bod.hits.length;
   const hot = totalHits > 0 || subj.exclaim > 2 || bod.exclaim > 4 || links.broken.length > 0;
+
+  // AI check — manual only, on demand. Runs on the RENDERED content (real
+  // sample data filled in), never automatically, never on keystrokes —
+  // each run is a deliberate choice and spends one Gemini call.
+  const [aiChecking, setAiChecking] = useState(false);
+  const [aiResult, setAiResult] = useState<string | null>(null);
+  const [aiError, setAiError] = useState<string | null>(null);
+
+  const runAiCheck = async () => {
+    // Strip HTML tags before sending — the model should react to what a
+    // recipient would actually read, not markup syntax.
+    const plainBody = html ? renderedBody.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim() : renderedBody;
+    const content = `Subject: ${renderedSubject || "(empty)"}\n\n${plainBody || "(empty)"}`;
+    const prompt = spamCheckPrompt.includes("[EMAIL_TEXT]")
+      ? spamCheckPrompt.replace("[EMAIL_TEXT]", content)
+      : `${spamCheckPrompt}\n\n${content}`;
+    setAiChecking(true);
+    setAiError(null);
+    try {
+      const result = await geminiCall(prompt);
+      setAiResult(result.trim());
+    } catch (err) {
+      setAiError((err as Error).message);
+    } finally {
+      setAiChecking(false);
+    }
+  };
+
+  const riskMatch = aiResult?.match(/Risk:\s*(Low|Medium|High)/i);
+  const riskLevel = riskMatch?.[1]?.toLowerCase();
+  const riskColor = riskLevel === "high" ? "text-destructive" : riskLevel === "medium" ? "text-amber-glow" : "text-emerald-400";
+
   return (
     <div
       className={`rounded-lg border p-3 ${
@@ -4612,8 +4989,43 @@ function SpamHealthCheck({
           )}
         </div>
       )}
+
+      <div className="mt-3 border-t border-border-strong/40 pt-3">
+        <button
+          type="button"
+          onClick={runAiCheck}
+          disabled={aiChecking}
+          className="flex w-full items-center justify-center gap-1.5 rounded-md border border-sky-glow/40 bg-sky-glow/10 py-2 font-mono-data text-[11px] text-sky-glow hover:bg-sky-glow/20 disabled:opacity-50"
+          title="Reads tone and phrasing on the rendered email — spends one Gemini call, only runs when you tap this"
+        >
+          {aiChecking ? (
+            <><RefreshCw className="size-3.5 animate-spin" /> Checking with AI…</>
+          ) : (
+            <><ShieldAlert className="size-3.5" /> {aiResult ? "Check again with AI" : "Check with AI"}</>
+          )}
+        </button>
+
+        {aiError && (
+          <p className="mt-2 font-mono-data text-[11px] text-destructive">{aiError}</p>
+        )}
+
+        {aiResult && !aiError && (
+          <div className="mt-2 space-y-1 rounded-md border border-border-strong/60 bg-bg-app p-2.5">
+            {riskLevel && (
+              <p className={`font-mono-data text-[11px] font-semibold uppercase tracking-wider ${riskColor}`}>
+                Risk: {riskLevel}
+              </p>
+            )}
+            <pre className="whitespace-pre-wrap font-mono-data text-[11px] leading-relaxed text-foreground">
+              {aiResult.replace(/^Risk:.*\n?/i, "").trim()}
+            </pre>
+          </div>
+        )}
+      </div>
     </div>
   );
 }
 
 /* ===================== end of file ===================== */
+
+
